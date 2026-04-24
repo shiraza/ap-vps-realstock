@@ -35,3 +35,20 @@ export interface StockMatrixRow {
   status: string;      // "AVAILABLE", "UNAVAILABLE", "UNKNOWN" 等
   updated_at: string;  // ISO 8601
 }
+
+/** notification_users テーブルの行 */
+export interface NotificationUser {
+  id: string;           // UUID
+  line_user_id: string;  // LINE ユーザーID
+  is_active: boolean;
+  created_at: string;    // ISO 8601
+}
+
+/** user_monitoring_conditions テーブルの行 */
+export interface UserMonitoringCondition {
+  id: string;           // UUID
+  user_id: string;      // FK → notification_users.id
+  part_number: string;  // FK → watch_products.part_number
+  area_id: number;      // FK → watch_areas.id
+  created_at: string;   // ISO 8601
+}

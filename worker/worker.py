@@ -7,6 +7,8 @@ iPhone在庫監視 Pythonワーカー
 3. watch_areas の各 postal_code ごとにループし、全 part_number をパラメータとして
    Apple Fulfillment API にGETリクエストを送信
 4. 取得した各店舗・各パーツの在庫ステータスを stock_matrix テーブルに upsert
+5. ステータスが UNAVAILABLE → AVAILABLE に変化した場合、
+   対象ユーザーにLINE通知を送信
 
 環境変数（.envから読み込み）:
   SUPABASE_URL          - SupabaseのURL
@@ -15,6 +17,8 @@ iPhone在庫監視 Pythonワーカー
   PROXY_PORT            - SmartProxyのポート
   PROXY_USER            - SmartProxyのユーザー名
   PROXY_PASS            - SmartProxyのパスワード
+  NOTIFY_API_URL        - Next.js通知APIのURL
+  NOTIFY_API_SECRET     - 通知API認証シークレット
 """
 
 import os
@@ -50,6 +54,10 @@ PROXY_PORT = os.getenv("PROXY_PORT", "")
 PROXY_USER = os.getenv("PROXY_USER", "")
 PROXY_PASS = os.getenv("PROXY_PASS", "")
 
+# LINE通知API設定
+NOTIFY_API_URL = os.getenv("NOTIFY_API_URL", "")
+NOTIFY_API_SECRET = os.getenv("NOTIFY_API_SECRET", "")
+
 # Apple Fulfillment API のベースURL
 # 旧プロジェクト（iphone-stock）で動作実績のあるエンドポイント
 APPLE_API_BASE = "https://www.apple.com/jp/shop/retail/pickup-message"
@@ -72,6 +80,15 @@ BATCH_SIZE = 3
 
 # バッチ間の待機時間（秒）— レート制限回避
 BATCH_DELAY = 2
+
+# ============================================================
+# インメモリ ステータスキャッシュ
+# キー: "{part_number}:{store_id}", 値: ステータス文字列
+# 初回起動時は空（初回は全て「変化なし」として扱い通知しない）
+# ============================================================
+last_status_cache: dict[str, str] = {}
+# 初回サイクルフラグ（初回は通知を抑制する）
+is_first_cycle = True
 
 
 # ============================================================
@@ -204,26 +221,153 @@ def fetch_stock_from_apple(
 
 
 # ============================================================
-# 在庫データの解析とUpsert
+# 通知対象ユーザーの取得
+# ============================================================
+def get_notification_targets(
+    supabase: Client,
+    part_number: str,
+    area_id: int,
+) -> list[str]:
+    """
+    指定されたpart_number + area_idに対する通知対象のLINEユーザーIDリストを取得する
+
+    user_monitoring_conditions と notification_users を結合し、
+    is_active=true のユーザーの line_user_id を返す。
+
+    Args:
+        supabase: Supabaseクライアント
+        part_number: 在庫復活した商品のパーツ番号
+        area_id: 在庫復活したエリアのID
+
+    Returns:
+        通知対象のline_user_idリスト
+    """
+    try:
+        # user_monitoring_conditions から対象の user_id を取得
+        conditions_res = (
+            supabase.table("user_monitoring_conditions")
+            .select("user_id")
+            .eq("part_number", part_number)
+            .eq("area_id", area_id)
+            .execute()
+        )
+        conditions = conditions_res.data or []
+
+        if not conditions:
+            return []
+
+        # 対象ユーザーIDのリスト
+        user_ids = [c["user_id"] for c in conditions]
+
+        # notification_users からアクティブなユーザーの line_user_id を取得
+        users_res = (
+            supabase.table("notification_users")
+            .select("line_user_id")
+            .in_("id", user_ids)
+            .eq("is_active", True)
+            .execute()
+        )
+        users = users_res.data or []
+
+        return [u["line_user_id"] for u in users]
+
+    except Exception as e:
+        logger.error(f"❌ 通知対象ユーザーの取得エラー: {e}")
+        return []
+
+
+# ============================================================
+# Next.js 通知APIへのリクエスト送信
+# ============================================================
+def send_notification(
+    model_name: str,
+    store_name: str,
+    part_number: str,
+    target_line_user_ids: list[str],
+) -> bool:
+    """
+    Next.js の通知API (/api/notify) にPOSTリクエストを送信する
+
+    Args:
+        model_name: モデル名（例: "iPhone 17 Pro Max 256GB シルバー"）
+        store_name: 店舗名（例: "Apple 銀座"）
+        part_number: パーツ番号（例: "MFY84J/A"）
+        target_line_user_ids: 通知対象のLINEユーザーIDリスト
+
+    Returns:
+        送信成功: True, 失敗: False
+    """
+    if not NOTIFY_API_URL:
+        logger.warning("⚠️ NOTIFY_API_URL が設定されていません。通知をスキップします。")
+        return False
+
+    if not NOTIFY_API_SECRET:
+        logger.warning("⚠️ NOTIFY_API_SECRET が設定されていません。通知をスキップします。")
+        return False
+
+    try:
+        response = requests.post(
+            NOTIFY_API_URL,
+            json={
+                "modelName": model_name,
+                "storeName": store_name,
+                "partNumber": part_number,
+                "targetLineUserIds": target_line_user_ids,
+            },
+            headers={
+                "Authorization": f"Bearer {NOTIFY_API_SECRET}",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+
+        if response.ok:
+            result = response.json()
+            logger.info(
+                f"📨 LINE通知送信成功: 送信={result.get('sent', 0)}, "
+                f"失敗={result.get('failed', 0)}"
+            )
+            return True
+        else:
+            logger.error(
+                f"❌ 通知API HTTPエラー: {response.status_code} "
+                f"- {response.text[:200]}"
+            )
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ 通知APIリクエストエラー: {e}")
+        return False
+
+
+# ============================================================
+# 在庫データの解析とUpsert（状態変化検知付き）
 # ============================================================
 def parse_and_upsert(
     supabase: Client,
     api_response: dict,
     part_numbers: list[str],
     area_stores: list[dict],
+    area_id: int,
+    product_info_map: dict[str, dict],
 ) -> int:
     """
     Apple APIレスポンスを解析し、stock_matrixにupsertする
+    ステータス変化（UNAVAILABLE → AVAILABLE）を検知した場合は通知を送信する
 
     Args:
         supabase: Supabaseクライアント
         api_response: Apple APIのJSONレスポンス
         part_numbers: 対象パーツ番号リスト
         area_stores: エリアの店舗リスト [{store_id, store_name}, ...]
+        area_id: エリアのID（通知対象ユーザー検索用）
+        product_info_map: パーツ番号 → 商品情報のマップ
 
     Returns:
         upsert件数
     """
+    global last_status_cache, is_first_cycle
+
     stores_data = api_response.get("body", {}).get("stores", [])
     if not stores_data:
         logger.warning("⚠️ APIレスポンスに店舗データが含まれていません")
@@ -236,6 +380,10 @@ def parse_and_upsert(
 
     upsert_rows = []
     now = datetime.now(timezone.utc).isoformat()
+
+    # 在庫復活を検知した場合の通知情報を蓄積
+    # キー: part_number, 値: 復活した店舗名のリスト
+    stock_alerts: dict[str, list[str]] = {}
 
     for store in stores_data:
         store_number = store.get("storeNumber", "")
@@ -251,6 +399,28 @@ def parse_and_upsert(
                 status = part_info.get("pickupDisplay", "UNKNOWN").upper()
             else:
                 status = "UNKNOWN"
+
+            # ---- 状態変化の検知 ----
+            cache_key = f"{pn}:{store_number}"
+            old_status = last_status_cache.get(cache_key)
+
+            # UNAVAILABLE → AVAILABLE の変化を検知（初回サイクルは除外）
+            if (
+                not is_first_cycle
+                and old_status is not None
+                and old_status == "UNAVAILABLE"
+                and status == "AVAILABLE"
+            ):
+                logger.info(
+                    f"🔔 在庫復活検知! {pn} @ {store_name} "
+                    f"({old_status} → {status})"
+                )
+                if pn not in stock_alerts:
+                    stock_alerts[pn] = []
+                stock_alerts[pn].append(store_name)
+
+            # キャッシュを更新
+            last_status_cache[cache_key] = status
 
             upsert_rows.append({
                 "part_number": pn,
@@ -271,11 +441,44 @@ def parse_and_upsert(
             on_conflict="part_number,store_id",
         ).execute()
         logger.info(f"💾 stock_matrix に {len(upsert_rows)} 件 upsert 完了")
-        return len(upsert_rows)
 
     except Exception as e:
         logger.error(f"❌ stock_matrix upsert エラー: {e}")
         return 0
+
+    # ---- 在庫復活通知の送信 ----
+    if stock_alerts:
+        for pn, store_names in stock_alerts.items():
+            # 通知対象ユーザーを取得
+            target_ids = get_notification_targets(supabase, pn, area_id)
+
+            if not target_ids:
+                logger.info(
+                    f"ℹ️ {pn} の通知対象ユーザーはいません（スキップ）"
+                )
+                continue
+
+            # 商品情報を取得
+            product = product_info_map.get(pn, {})
+            model_name = product.get("model_name", "不明")
+            capacity = product.get("capacity", "")
+            color = product.get("color", "")
+            full_model_name = f"{model_name} {capacity} {color}".strip()
+
+            # 店舗ごとに通知を送信
+            for store_name in store_names:
+                logger.info(
+                    f"📨 通知送信: {full_model_name} @ {store_name} "
+                    f"→ {len(target_ids)} 人"
+                )
+                send_notification(
+                    model_name=full_model_name,
+                    store_name=store_name,
+                    part_number=pn,
+                    target_line_user_ids=target_ids,
+                )
+
+    return len(upsert_rows)
 
 
 # ============================================================
@@ -306,6 +509,7 @@ def get_poll_interval(supabase: Client) -> int:
 
 def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
     """1回分のチェックサイクルを実行する"""
+    global is_first_cycle
 
     # 0. プロキシIPを確認（ローテーション確認用）
     verify_proxy_ip(proxies)
@@ -331,7 +535,7 @@ def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
     try:
         products_res = (
             supabase.table("watch_products")
-            .select("part_number")
+            .select("part_number, model_name, capacity, color")
             .eq("is_active", True)
             .execute()
         )
@@ -345,12 +549,15 @@ def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
         return
 
     part_numbers = [p["part_number"] for p in products]
+    # パーツ番号 → 商品情報のマップ（通知メッセージ生成用）
+    product_info_map = {p["part_number"]: p for p in products}
     logger.info(f"🔍 監視対象: {len(areas)} エリア × {len(part_numbers)} 商品（バッチサイズ: {BATCH_SIZE}）")
 
     # 3. エリアごとにApple APIに問い合わせ（バッチ分割）
     total_upserted = 0
     for area in areas:
         area_name = area.get("name", "不明")
+        area_id = area.get("id")
         postal_code = area.get("postal_code", "")
         area_stores = area.get("stores", [])
 
@@ -377,13 +584,26 @@ def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
                 logger.error(f"  ❌ バッチ {batch_idx + 1} のAPI取得に失敗")
                 continue
 
-            # 結果をstock_matrixにupsert
-            upserted = parse_and_upsert(supabase, api_response, batch, area_stores)
+            # 結果をstock_matrixにupsert（状態変化検知付き）
+            upserted = parse_and_upsert(
+                supabase, api_response, batch, area_stores,
+                area_id=area_id,
+                product_info_map=product_info_map,
+            )
             total_upserted += upserted
 
             # バッチ間の待機（最後のバッチは不要）
             if batch_idx < len(batches) - 1:
                 time.sleep(BATCH_DELAY)
+
+    # 初回サイクル完了フラグ
+    if is_first_cycle:
+        is_first_cycle = False
+        cache_size = len(last_status_cache)
+        logger.info(
+            f"📋 初回サイクル完了 — ステータスキャッシュに {cache_size} 件を格納"
+            f"（次回から状態変化を検知します）"
+        )
 
     logger.info(f"✅ チェックサイクル完了 (合計 {total_upserted} 件更新)")
 
@@ -411,6 +631,15 @@ def main():
     except ValueError as e:
         logger.error(str(e))
         return
+
+    # LINE通知設定の確認
+    if NOTIFY_API_URL and NOTIFY_API_SECRET:
+        logger.info("✅ LINE通知設定完了")
+    else:
+        logger.warning(
+            "⚠️ LINE通知が未設定です（NOTIFY_API_URL, NOTIFY_API_SECRET）\n"
+            "   在庫変化の検知は行いますが、通知は送信されません。"
+        )
 
     logger.info(f"⏱️ デフォルトチェック間隔: {DEFAULT_POLL_INTERVAL}秒（管理画面から変更可能）")
     logger.info("=" * 60)
