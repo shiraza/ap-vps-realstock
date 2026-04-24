@@ -167,10 +167,23 @@ def get_proxies() -> dict:
     }
 
 
-def verify_proxy_ip(proxies: dict) -> str | None:
+def get_direct_ip() -> str | None:
+    """
+    プロキシなしで自分のIPアドレスを取得する（起動時チェック用）
+    """
+    try:
+        res = requests.get("https://httpbin.org/ip", timeout=10)
+        res.raise_for_status()
+        return res.json().get("origin", "")
+    except Exception:
+        return None
+
+
+def verify_proxy_ip(proxies: dict, direct_ip: str | None = None) -> str | None:
     """
     プロキシ経由で現在のIPアドレスを取得・表示する
-    起動時の確認用（自IPでないことを確認）
+    direct_ip が指定されている場合、プロキシIPと一致しないことを検証する
+    （一致 = プロキシが機能していない → 即座にエラー停止）
     """
     try:
         res = requests.get(
@@ -179,9 +192,21 @@ def verify_proxy_ip(proxies: dict) -> str | None:
             timeout=10,
         )
         res.raise_for_status()
-        ip = res.json().get("origin", "不明")
-        logger.info(f"🌐 プロキシIP確認: {ip}")
-        return ip
+        proxy_ip = res.json().get("origin", "不明")
+        logger.info(f"🌐 プロキシIP確認: {proxy_ip}")
+
+        # 自IPとプロキシIPが一致する場合、プロキシが機能していない
+        if direct_ip and proxy_ip == direct_ip:
+            raise RuntimeError(
+                f"🚨 致命的エラー: プロキシIPが自IPと一致しています！\n"
+                f"   自IP: {direct_ip}\n"
+                f"   プロキシIP: {proxy_ip}\n"
+                f"   → プロキシが正しく機能していません。ワーカーを停止します。"
+            )
+
+        return proxy_ip
+    except RuntimeError:
+        raise  # RuntimeErrorはそのまま上位に伝播
     except Exception as e:
         logger.warning(f"⚠️ プロキシIP確認に失敗（動作には影響なし）: {e}")
         return None
@@ -208,13 +233,23 @@ def build_api_url(part_numbers: list[str], postal_code: str) -> str:
 def fetch_stock_from_apple(
     part_numbers: list[str],
     postal_code: str,
-    proxies: dict | None,
+    proxies: dict,
 ) -> dict | None:
     """
     Apple Fulfillment API から在庫情報を取得する
 
+    【重要】proxies は必須。None や空辞書は絶対に許可しない。
     戻り値: APIレスポンスのJSON（辞書）またはNone（エラー時）
     """
+    # ========== 防御層: プロキシなしでのリクエストを絶対に許可しない ==========
+    if not proxies or "https" not in proxies:
+        logger.critical(
+            "🚨 致命的エラー: プロキシ設定なしでApple APIを呼び出そうとしました！\n"
+            "   自IPでのアクセスは禁止されています。リクエストを中止します。"
+        )
+        raise RuntimeError("プロキシなしでのApple APIアクセスは禁止されています")
+    # =====================================================================
+
     url = build_api_url(part_numbers, postal_code)
     headers = {
         "User-Agent": USER_AGENT,
@@ -566,8 +601,8 @@ def get_poll_interval(supabase: Client) -> int:
     return DEFAULT_POLL_INTERVAL
 
 
-def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
-    """1回分のチェックサイクルを実行する"""
+def run_check_cycle(supabase: Client, proxies: dict) -> None:
+    """1回分のチェックサイクルを実行する（proxiesは必須）"""
     global is_first_cycle
 
     # 0. プロキシIPを確認（ローテーション確認用）
@@ -688,10 +723,19 @@ def main():
     try:
         proxies = get_proxies()
         logger.info("✅ SmartProxy設定完了")
-        # プロキシ経由のIPアドレスを確認・表示
-        verify_proxy_ip(proxies)
-    except ValueError as e:
-        logger.error(str(e))
+
+        # 自IPを取得（プロキシとの比較用）
+        logger.info("🔒 自IPアドレスを取得中（プロキシ検証用）...")
+        direct_ip = get_direct_ip()
+        if direct_ip:
+            logger.info(f"🔒 自IP: {direct_ip}（このIPでApple APIを叩いてはいけません）")
+        else:
+            logger.warning("⚠️ 自IPの取得に失敗（プロキシ比較チェックをスキップ）")
+
+        # プロキシ経由のIPアドレスを確認・自IPと比較
+        verify_proxy_ip(proxies, direct_ip=direct_ip)
+    except (ValueError, RuntimeError) as e:
+        logger.critical(f"🚨 {e}")
         return
 
     # LINE通知設定の確認
