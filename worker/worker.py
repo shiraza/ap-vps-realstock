@@ -565,7 +565,8 @@ def parse_and_upsert(
     # 店舗名マップ
     store_name_map = {s["store_id"]: s["store_name"] for s in area_stores}
 
-    upsert_rows = []
+    upsert_rows_changed = []
+    upsert_rows_unchanged = []
     now = datetime.now(timezone.utc).isoformat()
 
     # 在庫復活を検知した場合の通知情報を蓄積
@@ -626,19 +627,30 @@ def parse_and_upsert(
             }
             if status_changed:
                 upsert_row["notified"] = False
-            upsert_rows.append(upsert_row)
+                upsert_rows_changed.append(upsert_row)
+            else:
+                upsert_rows_unchanged.append(upsert_row)
 
-    if not upsert_rows:
+    total_upserted = len(upsert_rows_changed) + len(upsert_rows_unchanged)
+    if total_upserted == 0:
         logger.warning("⚠️ upsert対象のデータがありません")
         return 0
 
     try:
         # stock_matrix に upsert（複合PK: part_number + store_id）
-        supabase.table("stock_matrix").upsert(
-            upsert_rows,
-            on_conflict="part_number,store_id",
-        ).execute()
-        logger.info(f"💾 stock_matrix に {len(upsert_rows)} 件 upsert 完了")
+        if upsert_rows_changed:
+            supabase.table("stock_matrix").upsert(
+                upsert_rows_changed,
+                on_conflict="part_number,store_id",
+            ).execute()
+            
+        if upsert_rows_unchanged:
+            supabase.table("stock_matrix").upsert(
+                upsert_rows_unchanged,
+                on_conflict="part_number,store_id",
+            ).execute()
+            
+        logger.info(f"💾 stock_matrix に {total_upserted} 件 upsert 完了")
 
     except Exception as e:
         logger.error(f"❌ stock_matrix upsert エラー: {e}")
@@ -699,7 +711,7 @@ def parse_and_upsert(
                 if ok:
                     mark_notified(supabase, pn, sid)
 
-    return len(upsert_rows)
+    return total_upserted
 
 
 # ============================================================
