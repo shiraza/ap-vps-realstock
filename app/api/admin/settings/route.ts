@@ -18,12 +18,12 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    // バリデーション: poll_interval は 5〜600 の整数のみ
+    // バリデーション: poll_interval は 0（停止）または 5〜600 の整数のみ
     if (key === "poll_interval") {
       const num = parseInt(value, 10);
-      if (isNaN(num) || num < 5 || num > 600) {
+      if (isNaN(num) || (num !== 0 && (num < 5 || num > 600))) {
         return NextResponse.json(
-          { error: "ポーリング間隔は5〜600秒の範囲で設定してください" },
+          { error: "ポーリング間隔は0（停止）または5〜600秒の範囲で設定してください" },
           { status: 400 }
         );
       }

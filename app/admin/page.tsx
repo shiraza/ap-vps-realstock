@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminPage() {
   let areas: WatchArea[] = [];
   let products: WatchProduct[] = [];
-  let pollInterval = 20;
+  let pollInterval = 30;
   let notificationUsers: NotificationUser[] = [];
   let monitoringConditions: UserMonitoringCondition[] = [];
 

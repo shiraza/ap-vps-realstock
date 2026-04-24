@@ -452,7 +452,23 @@ def parse_and_upsert(
             model_name = product.get("model_name", "不明")
             capacity = product.get("capacity", "")
             color = product.get("color", "")
-            full_model_name = f"{model_name} {capacity} {color}".strip()
+
+            # 短縮名を生成（例: "Pro256シルバー", "ProMax512オレンジ"）
+            short_model = model_name
+            if "Pro Max" in model_name or "ProMax" in model_name:
+                short_model = "ProMax"
+            elif "Pro" in model_name:
+                short_model = "Pro"
+
+            short_cap = capacity.replace("GB", "").replace("TB", "TB")
+            short_color = color
+            for orig, repl in [
+                ("コズミックオレンジ", "オレンジ"),
+                ("ディープブルー", "ブルー"),
+            ]:
+                short_color = short_color.replace(orig, repl)
+
+            full_model_name = f"{short_model}{short_cap}{short_color}"
 
             # 店舗ごとに通知対象を検索して送信
             for sid, sname in store_infos:

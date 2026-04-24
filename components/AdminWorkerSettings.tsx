@@ -12,10 +12,11 @@ interface AdminWorkerSettingsProps {
 }
 
 const INTERVAL_OPTIONS = [
+  { value: 0, label: "⏹ 停止" },
   { value: 10, label: "10秒" },
   { value: 15, label: "15秒" },
-  { value: 20, label: "20秒（デフォルト）" },
-  { value: 30, label: "30秒" },
+  { value: 20, label: "20秒" },
+  { value: 30, label: "30秒（デフォルト）" },
   { value: 60, label: "1分" },
   { value: 120, label: "2分" },
   { value: 300, label: "5分" },
@@ -77,7 +78,7 @@ export default function AdminWorkerSettings({
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {INTERVAL_OPTIONS.map((opt) => (
             <button
               key={opt.value}
@@ -85,11 +86,15 @@ export default function AdminWorkerSettings({
               disabled={saving}
               className={`
                 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200
-                focus:outline-none focus:ring-2 focus:ring-blue-500/50
+                focus:outline-none focus:ring-2
                 ${
-                  interval === opt.value
-                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
-                    : "bg-gray-700/40 text-gray-300 hover:bg-gray-700/60 hover:text-gray-100"
+                  opt.value === 0
+                    ? interval === 0
+                      ? "bg-red-600 text-white shadow-lg shadow-red-500/25 ring-red-500/50"
+                      : "bg-gray-700/40 text-red-400 hover:bg-red-500/20 hover:text-red-300 focus:ring-red-500/50"
+                    : interval === opt.value
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25 ring-blue-500/50"
+                    : "bg-gray-700/40 text-gray-300 hover:bg-gray-700/60 hover:text-gray-100 focus:ring-blue-500/50"
                 }
                 ${saving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
               `}
@@ -100,10 +105,21 @@ export default function AdminWorkerSettings({
         </div>
 
         <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
-          <span className="w-2 h-2 rounded-full bg-yellow-500/60" />
+          <span
+            className={`w-2 h-2 rounded-full ${
+              interval === 0 ? "bg-red-500/80" : "bg-yellow-500/60"
+            }`}
+          />
           <span>
-            現在の設定: <strong className="text-gray-300">{interval}秒</strong>
-            ごとにApple APIをチェック
+            現在の設定:{" "}
+            {interval === 0 ? (
+              <strong className="text-red-400">停止中（ポーリングしていません）</strong>
+            ) : (
+              <>
+                <strong className="text-gray-300">{interval}秒</strong>
+                ごとにApple APIをチェック
+              </>
+            )}
           </span>
         </div>
       </div>
