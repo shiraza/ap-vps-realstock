@@ -1,0 +1,35 @@
+# 依存パッケージ
+node_modules/
+
+# ビルド出力
+.next/
+out/
+
+# 環境変数
+.env
+.env.local
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+worker/__pycache__/
+worker/*.pyc
+worker/.env
+worker/venv/
+
+# デバッグ
+npm-debug.log*
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
