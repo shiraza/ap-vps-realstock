@@ -104,6 +104,27 @@ def init_supabase() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
+def ensure_notified_column(supabase: Client) -> None:
+    """
+    stock_matrix テーブルに notified カラムが存在しなければ追加する。
+    Supabase の rpc で ALTER TABLE を実行する。
+    （既にカラムが存在する場合は何もしない）
+    """
+    try:
+        # IF NOT EXISTS で冪等に実行
+        supabase.rpc("exec_sql", {
+            "query": "ALTER TABLE stock_matrix ADD COLUMN IF NOT EXISTS notified BOOLEAN NOT NULL DEFAULT false"
+        }).execute()
+        logger.info("✅ stock_matrix.notified カラムを確認/追加しました")
+    except Exception as e:
+        # rpcが使えない場合（exec_sql関数がない場合）はスキップ
+        logger.warning(
+            f"⚠️ notifiedカラムの自動追加に失敗しました: {e}\n"
+            f"   手動で以下のSQLを実行してください:\n"
+            f"   ALTER TABLE stock_matrix ADD COLUMN IF NOT EXISTS notified BOOLEAN NOT NULL DEFAULT false;"
+        )
+
+
 def load_initial_cache(supabase: Client) -> int:
     """
     起動時にDBの stock_matrix から前回のステータスをキャッシュに読み込む。
@@ -139,6 +160,101 @@ def load_initial_cache(supabase: Client) -> int:
     except Exception as e:
         logger.warning(f"⚠️ 初期キャッシュの読み込みに失敗: {e}")
         return 0
+
+
+def recover_pending_notifications(supabase: Client) -> int:
+    """
+    起動時に「AVAILABLE なのに未通知」の在庫を検出し、通知を送信する。
+
+    これにより、ワーカー再起動で失われた通知を回復できる。
+    条件: status = 'AVAILABLE' かつ notified = false
+    """
+    try:
+        res = (
+            supabase.table("stock_matrix")
+            .select("part_number, store_id, store_name, status")
+            .eq("status", "AVAILABLE")
+            .eq("notified", False)
+            .execute()
+        )
+        pending = res.data or []
+
+        if not pending:
+            logger.info("✅ 未通知の在庫復活はありません")
+            return 0
+
+        logger.info(f"🔔 未通知の在庫復活を {len(pending)} 件検出 — 通知を送信します")
+
+        # 商品情報を取得（通知メッセージ生成用）
+        products_res = (
+            supabase.table("watch_products")
+            .select("part_number, model_name, capacity, color")
+            .execute()
+        )
+        product_info_map = {
+            p["part_number"]: p for p in (products_res.data or [])
+        }
+
+        sent_count = 0
+        for row in pending:
+            pn = row["part_number"]
+            sid = row["store_id"]
+            sname = row["store_name"]
+
+            # 通知対象ユーザーを取得
+            target_ids = get_notification_targets(supabase, pn, sid)
+            if not target_ids:
+                logger.info(f"  ℹ️ {pn} @ {sname}: 通知対象ユーザーなし（スキップ）")
+                # 通知対象がいなくても notified=true にする（無限ループ防止）
+                mark_notified(supabase, pn, sid)
+                continue
+
+            # 商品名を生成
+            product = product_info_map.get(pn, {})
+            model_name = product.get("model_name", "不明")
+            capacity = product.get("capacity", "")
+            color = product.get("color", "")
+            short_model = model_name
+            if "Pro Max" in model_name or "ProMax" in model_name:
+                short_model = "ProMax"
+            elif "Pro" in model_name:
+                short_model = "Pro"
+            short_cap = capacity.replace("GB", "").replace("TB", "TB")
+            short_color = color
+            for orig, repl in [
+                ("コズミックオレンジ", "オレンジ"),
+                ("ディープブルー", "ブルー"),
+            ]:
+                short_color = short_color.replace(orig, repl)
+            full_model_name = f"{short_model}{short_cap}{short_color}"
+
+            logger.info(f"  📨 回復通知: {full_model_name} @ {sname} → {len(target_ids)} 人")
+            ok = send_notification(
+                model_name=full_model_name,
+                store_name=sname,
+                part_number=pn,
+                target_line_user_ids=target_ids,
+            )
+            if ok:
+                mark_notified(supabase, pn, sid)
+                sent_count += 1
+
+        logger.info(f"✅ 回復通知完了: {sent_count}/{len(pending)} 件送信")
+        return sent_count
+
+    except Exception as e:
+        logger.error(f"❌ 回復通知処理エラー: {e}")
+        return 0
+
+
+def mark_notified(supabase: Client, part_number: str, store_id: str) -> None:
+    """stock_matrix の notified フラグを true に更新する"""
+    try:
+        supabase.table("stock_matrix").update(
+            {"notified": True}
+        ).eq("part_number", part_number).eq("store_id", store_id).execute()
+    except Exception as e:
+        logger.error(f"❌ notifiedフラグ更新エラー ({part_number}:{store_id}): {e}")
 
 
 # ============================================================
@@ -499,13 +615,18 @@ def parse_and_upsert(
             # キャッシュを更新
             last_status_cache[cache_key] = status
 
-            upsert_rows.append({
+            # ステータスが変化した場合は notified をリセット
+            status_changed = old_status is not None and old_status != status
+            upsert_row = {
                 "part_number": pn,
                 "store_id": store_number,
                 "store_name": store_name,
                 "status": status,
                 "updated_at": now,
-            })
+            }
+            if status_changed:
+                upsert_row["notified"] = False
+            upsert_rows.append(upsert_row)
 
     if not upsert_rows:
         logger.warning("⚠️ upsert対象のデータがありません")
@@ -525,6 +646,7 @@ def parse_and_upsert(
 
     # ---- 在庫復活通知の送信 ----
     if stock_alerts:
+        logger.info(f"🔔 在庫復活を {sum(len(v) for v in stock_alerts.values())} 件検知")
         for pn, store_infos in stock_alerts.items():
             # 商品情報を取得
             product = product_info_map.get(pn, {})
@@ -559,18 +681,23 @@ def parse_and_upsert(
                         f"⚠️ {pn} @ {sname} の通知対象ユーザーはいません\n"
                         f"   → user_monitoring_conditions にこの商品×店舗の登録があるか確認してください"
                     )
+                    # 通知対象がいなくても notified=true にする（無限ループ防止）
+                    mark_notified(supabase, pn, sid)
                     continue
 
                 logger.info(
                     f"📨 通知送信: {full_model_name} @ {sname} "
                     f"→ {len(target_ids)} 人"
                 )
-                send_notification(
+                ok = send_notification(
                     model_name=full_model_name,
                     store_name=sname,
                     part_number=pn,
                     target_line_user_ids=target_ids,
                 )
+                # 通知成功時にDBのnotifiedフラグを更新
+                if ok:
+                    mark_notified(supabase, pn, sid)
 
     return len(upsert_rows)
 
@@ -714,6 +841,9 @@ def main():
         logger.error(f"❌ Supabase接続失敗: {e}")
         return
 
+    # stock_matrix に notified カラムを追加（存在しない場合のみ）
+    ensure_notified_column(supabase)
+
     # 起動時にDBから前回ステータスをキャッシュに読み込む
     # これにより再起動後も在庫変化を正しく検知できる
     cache_count = load_initial_cache(supabase)
@@ -741,6 +871,10 @@ def main():
     # LINE通知設定の確認
     if NOTIFY_API_URL and NOTIFY_API_SECRET:
         logger.info("✅ LINE通知設定完了")
+
+        # 起動時に未通知のAVAILABLE在庫があれば回復通知を送信
+        logger.info("🔍 未通知の在庫復活を確認中...")
+        recover_pending_notifications(supabase)
     else:
         logger.warning(
             "⚠️ LINE通知が未設定です（NOTIFY_API_URL, NOTIFY_API_SECRET）\n"
