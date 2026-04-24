@@ -191,6 +191,31 @@ export default function AdminUsers({
   };
 
   const activeUsers = users.filter((u) => u.is_active).length;
+  const [syncing, setSyncing] = useState(false);
+
+  /**
+   * 全ユーザーのプロフィールをLINE APIから一括取得して更新
+   */
+  const syncProfiles = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/admin/users/sync-profiles", {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("プロフィール取得に失敗しました");
+      const result = await res.json();
+      alert(
+        `プロフィール更新完了\n更新: ${result.updated}件 / 失敗: ${result.failed}件`
+      );
+      // ページをリロードして最新データを反映
+      window.location.reload();
+    } catch (err) {
+      console.error("プロフィール同期エラー:", err);
+      alert("プロフィール取得に失敗しました。LINE_CHANNEL_ACCESS_TOKEN を確認してください。");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -199,9 +224,24 @@ export default function AdminUsers({
         <h2 className="text-xl font-bold text-gray-100 flex items-center gap-2">
           💬 LINE通知ユーザー
         </h2>
-        <span className="text-sm text-gray-400">
-          {activeUsers} / {users.length} 人アクティブ
-        </span>
+        <div className="flex items-center gap-3">
+          {users.length > 0 && (
+            <button
+              onClick={syncProfiles}
+              disabled={syncing}
+              className={`
+                text-xs px-3 py-1.5 rounded-lg transition-colors
+                bg-gray-700/40 text-gray-400 hover:bg-gray-700/60 hover:text-gray-200
+                ${syncing ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+              `}
+            >
+              {syncing ? "⏳ 取得中..." : "🔄 プロフィール更新"}
+            </button>
+          )}
+          <span className="text-sm text-gray-400">
+            {activeUsers} / {users.length} 人アクティブ
+          </span>
+        </div>
       </div>
 
       {users.length === 0 ? (
@@ -234,20 +274,33 @@ export default function AdminUsers({
                 {/* ユーザー情報ヘッダー */}
                 <div className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    {/* LINEアイコン */}
-                    <div
-                      className={`
-                      flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg
-                      ${user.is_active ? "bg-emerald-500/20" : "bg-gray-700/40"}
-                    `}
-                    >
-                      💬
-                    </div>
+                    {/* プロフィール画像 */}
+                    {user.picture_url ? (
+                      <img
+                        src={user.picture_url}
+                        alt={user.display_name || "LINE"}
+                        className="flex-shrink-0 w-10 h-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div
+                        className={`
+                        flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-lg
+                        ${user.is_active ? "bg-emerald-500/20" : "bg-gray-700/40"}
+                      `}
+                      >
+                        💬
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <p className="font-medium text-gray-200 text-sm truncate">
-                        {shortUserId(user.line_user_id)}
+                        {user.display_name || shortUserId(user.line_user_id)}
                       </p>
                       <div className="flex items-center gap-3 mt-0.5">
+                        {user.display_name && (
+                          <span className="text-[10px] text-gray-600 font-mono truncate max-w-[100px]">
+                            {shortUserId(user.line_user_id)}
+                          </span>
+                        )}
                         <span className="text-xs text-gray-500">
                           登録:{" "}
                           {new Date(user.created_at).toLocaleDateString("ja-JP")}

@@ -24,3 +24,9 @@ CREATE INDEX idx_umc_user       ON user_monitoring_conditions (user_id);
 ALTER TABLE user_monitoring_conditions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "全員が読み取り可能" ON user_monitoring_conditions FOR SELECT USING (true);
 CREATE POLICY "サービスロールのみ書き込み可能" ON user_monitoring_conditions FOR ALL USING (auth.role() = 'service_role');
+
+-- ============================================================
+-- notification_users に表示名・画像URLカラムを追加
+-- ============================================================
+ALTER TABLE notification_users ADD COLUMN IF NOT EXISTS display_name TEXT;
+ALTER TABLE notification_users ADD COLUMN IF NOT EXISTS picture_url TEXT;

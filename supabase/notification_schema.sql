@@ -12,14 +12,18 @@
 --    LINEボットを友だち追加したユーザーを管理する
 -- ============================================================
 CREATE TABLE IF NOT EXISTS notification_users (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  line_user_id  TEXT UNIQUE NOT NULL,            -- LINE ユーザーID（例: "U1234abcd..."）
-  is_active     BOOLEAN NOT NULL DEFAULT true,   -- 友だち状態（unfollow時にfalse）
-  created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  line_user_id    TEXT UNIQUE NOT NULL,            -- LINE ユーザーID（例: "U1234abcd..."）
+  display_name    TEXT,                            -- LINEの表示名（プロフィールから取得）
+  picture_url     TEXT,                            -- LINEのプロフィール画像URL
+  is_active       BOOLEAN NOT NULL DEFAULT true,   -- 友だち状態（unfollow時にfalse）
+  created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE  notification_users              IS 'LINEボットの友だちユーザー管理';
 COMMENT ON COLUMN notification_users.line_user_id IS 'LINE PlatformのユーザーID';
+COMMENT ON COLUMN notification_users.display_name IS 'LINEの表示名（プロフィールAPIから取得）';
+COMMENT ON COLUMN notification_users.picture_url  IS 'LINEのプロフィール画像URL';
 COMMENT ON COLUMN notification_users.is_active    IS 'true=友だち登録中, false=ブロック/解除済み';
 
 -- ============================================================

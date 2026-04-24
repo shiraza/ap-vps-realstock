@@ -38,10 +38,12 @@ export interface StockMatrixRow {
 
 /** notification_users テーブルの行 */
 export interface NotificationUser {
-  id: string;           // UUID
-  line_user_id: string;  // LINE ユーザーID
+  id: string;              // UUID
+  line_user_id: string;    // LINE ユーザーID
+  display_name: string | null;  // LINEの表示名
+  picture_url: string | null;   // LINEのプロフィール画像URL
   is_active: boolean;
-  created_at: string;    // ISO 8601
+  created_at: string;      // ISO 8601
 }
 
 /** user_monitoring_conditions テーブルの行 */

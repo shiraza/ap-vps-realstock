@@ -2,7 +2,7 @@
  * LINE Webhook 受信API
  *
  * LINEプラットフォームからのWebhookイベントを処理する。
- * - follow（友だち追加） → notification_users に upsert
+ * - follow（友だち追加） → プロフィール取得 → notification_users に upsert
  * - unfollow（ブロック/解除） → is_active を false に更新
  *
  * セキュリティ: X-Line-Signature によるHMAC-SHA256署名検証
@@ -26,6 +26,39 @@ function verifySignature(body: string, signature: string): boolean {
     .digest("base64");
 
   return hash === signature;
+}
+
+/**
+ * LINE Profile API からユーザーのプロフィールを取得する
+ */
+async function getLineProfile(
+  userId: string
+): Promise<{ displayName: string; pictureUrl?: string } | null> {
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!accessToken) {
+    console.error("LINE_CHANNEL_ACCESS_TOKEN が設定されていません");
+    return null;
+  }
+
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!res.ok) {
+      console.error(`LINE Profile取得失敗 (${res.status}):`, await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    return {
+      displayName: data.displayName || "不明",
+      pictureUrl: data.pictureUrl || undefined,
+    };
+  } catch (error) {
+    console.error("LINE Profile取得エラー:", error);
+    return null;
+  }
 }
 
 // LINE Webhook イベントの型定義
@@ -83,12 +116,17 @@ export async function POST(request: NextRequest) {
       if (!userId) continue;
 
       if (event.type === "follow") {
-        // 友だち追加 → notification_users に upsert（is_active: true）
+        // LINE Profile API からユーザー情報を取得
+        const profile = await getLineProfile(userId);
+
+        // 友だち追加 → notification_users に upsert（プロフィール情報付き）
         const { error } = await supabase
           .from("notification_users")
           .upsert(
             {
               line_user_id: userId,
+              display_name: profile?.displayName || null,
+              picture_url: profile?.pictureUrl || null,
               is_active: true,
             },
             { onConflict: "line_user_id" }
@@ -97,7 +135,9 @@ export async function POST(request: NextRequest) {
         if (error) {
           console.error(`友だち追加の保存に失敗: ${error.message}`, { userId });
         } else {
-          console.log(`✅ 友だち追加を保存: ${userId}`);
+          console.log(
+            `✅ 友だち追加を保存: ${profile?.displayName || userId}`
+          );
         }
       } else if (event.type === "unfollow") {
         // ブロック/友だち解除 → is_active を false に更新
