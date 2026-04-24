@@ -56,16 +56,16 @@ export async function GET() {
 
 /**
  * POST: 監視条件を追加（upsert）
- * body: { user_id, part_number, area_id }
+ * body: { user_id, part_number, store_id }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, part_number, area_id } = body;
+    const { user_id, part_number, store_id } = body;
 
-    if (!user_id || !part_number || area_id === undefined) {
+    if (!user_id || !part_number || !store_id) {
       return NextResponse.json(
-        { error: "user_id, part_number, area_id は必須です" },
+        { error: "user_id, part_number, store_id は必須です" },
         { status: 400 }
       );
     }
@@ -74,8 +74,8 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from("user_monitoring_conditions")
       .upsert(
-        { user_id, part_number, area_id },
-        { onConflict: "user_id,part_number,area_id" }
+        { user_id, part_number, store_id },
+        { onConflict: "user_id,part_number,store_id" }
       )
       .select()
       .single();
@@ -95,16 +95,16 @@ export async function POST(request: NextRequest) {
 
 /**
  * DELETE: 監視条件を削除
- * body: { user_id, part_number, area_id }
+ * body: { user_id, part_number, store_id }
  */
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, part_number, area_id } = body;
+    const { user_id, part_number, store_id } = body;
 
-    if (!user_id || !part_number || area_id === undefined) {
+    if (!user_id || !part_number || !store_id) {
       return NextResponse.json(
-        { error: "user_id, part_number, area_id は必須です" },
+        { error: "user_id, part_number, store_id は必須です" },
         { status: 400 }
       );
     }
@@ -115,7 +115,7 @@ export async function DELETE(request: NextRequest) {
       .delete()
       .eq("user_id", user_id)
       .eq("part_number", part_number)
-      .eq("area_id", area_id);
+      .eq("store_id", store_id);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

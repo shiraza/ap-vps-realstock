@@ -226,10 +226,10 @@ def fetch_stock_from_apple(
 def get_notification_targets(
     supabase: Client,
     part_number: str,
-    area_id: int,
+    store_id: str,
 ) -> list[str]:
     """
-    指定されたpart_number + area_idに対する通知対象のLINEユーザーIDリストを取得する
+    指定されたpart_number + store_idに対する通知対象のLINEユーザーIDリストを取得する
 
     user_monitoring_conditions と notification_users を結合し、
     is_active=true のユーザーの line_user_id を返す。
@@ -237,7 +237,7 @@ def get_notification_targets(
     Args:
         supabase: Supabaseクライアント
         part_number: 在庫復活した商品のパーツ番号
-        area_id: 在庫復活したエリアのID
+        store_id: 在庫復活した店舗のID（例: "R381"）
 
     Returns:
         通知対象のline_user_idリスト
@@ -248,7 +248,7 @@ def get_notification_targets(
             supabase.table("user_monitoring_conditions")
             .select("user_id")
             .eq("part_number", part_number)
-            .eq("area_id", area_id)
+            .eq("store_id", store_id)
             .execute()
         )
         conditions = conditions_res.data or []
@@ -348,7 +348,6 @@ def parse_and_upsert(
     api_response: dict,
     part_numbers: list[str],
     area_stores: list[dict],
-    area_id: int,
     product_info_map: dict[str, dict],
 ) -> int:
     """
@@ -360,7 +359,6 @@ def parse_and_upsert(
         api_response: Apple APIのJSONレスポンス
         part_numbers: 対象パーツ番号リスト
         area_stores: エリアの店舗リスト [{store_id, store_name}, ...]
-        area_id: エリアのID（通知対象ユーザー検索用）
         product_info_map: パーツ番号 → 商品情報のマップ
 
     Returns:
@@ -382,8 +380,8 @@ def parse_and_upsert(
     now = datetime.now(timezone.utc).isoformat()
 
     # 在庫復活を検知した場合の通知情報を蓄積
-    # キー: part_number, 値: 復活した店舗名のリスト
-    stock_alerts: dict[str, list[str]] = {}
+    # キー: part_number, 値: 復活した店舗情報 (store_id, store_name) のリスト
+    stock_alerts: dict[str, list[tuple[str, str]]] = {}
 
     for store in stores_data:
         store_number = store.get("storeNumber", "")
@@ -417,7 +415,7 @@ def parse_and_upsert(
                 )
                 if pn not in stock_alerts:
                     stock_alerts[pn] = []
-                stock_alerts[pn].append(store_name)
+                stock_alerts[pn].append((store_number, store_name))
 
             # キャッシュを更新
             last_status_cache[cache_key] = status
@@ -448,16 +446,7 @@ def parse_and_upsert(
 
     # ---- 在庫復活通知の送信 ----
     if stock_alerts:
-        for pn, store_names in stock_alerts.items():
-            # 通知対象ユーザーを取得
-            target_ids = get_notification_targets(supabase, pn, area_id)
-
-            if not target_ids:
-                logger.info(
-                    f"ℹ️ {pn} の通知対象ユーザーはいません（スキップ）"
-                )
-                continue
-
+        for pn, store_infos in stock_alerts.items():
             # 商品情報を取得
             product = product_info_map.get(pn, {})
             model_name = product.get("model_name", "不明")
@@ -465,15 +454,24 @@ def parse_and_upsert(
             color = product.get("color", "")
             full_model_name = f"{model_name} {capacity} {color}".strip()
 
-            # 店舗ごとに通知を送信
-            for store_name in store_names:
+            # 店舗ごとに通知対象を検索して送信
+            for sid, sname in store_infos:
+                # 店舗ID + パーツ番号で通知対象ユーザーを取得
+                target_ids = get_notification_targets(supabase, pn, sid)
+
+                if not target_ids:
+                    logger.info(
+                        f"ℹ️ {pn} @ {sname} の通知対象ユーザーはいません（スキップ）"
+                    )
+                    continue
+
                 logger.info(
-                    f"📨 通知送信: {full_model_name} @ {store_name} "
+                    f"📨 通知送信: {full_model_name} @ {sname} "
                     f"→ {len(target_ids)} 人"
                 )
                 send_notification(
                     model_name=full_model_name,
-                    store_name=store_name,
+                    store_name=sname,
                     part_number=pn,
                     target_line_user_ids=target_ids,
                 )
@@ -557,7 +555,6 @@ def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
     total_upserted = 0
     for area in areas:
         area_name = area.get("name", "不明")
-        area_id = area.get("id")
         postal_code = area.get("postal_code", "")
         area_stores = area.get("stores", [])
 
@@ -587,7 +584,6 @@ def run_check_cycle(supabase: Client, proxies: dict | None) -> None:
             # 結果をstock_matrixにupsert（状態変化検知付き）
             upserted = parse_and_upsert(
                 supabase, api_response, batch, area_stores,
-                area_id=area_id,
                 product_info_map=product_info_map,
             )
             total_upserted += upserted

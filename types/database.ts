@@ -49,6 +49,6 @@ export interface UserMonitoringCondition {
   id: string;           // UUID
   user_id: string;      // FK → notification_users.id
   part_number: string;  // FK → watch_products.part_number
-  area_id: number;      // FK → watch_areas.id
+  store_id: string;     // 店舗ID（例: "R381"）
   created_at: string;   // ISO 8601
 }

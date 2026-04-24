@@ -2,19 +2,28 @@
  * 管理画面: LINE通知ユーザー管理コンポーネント
  *
  * - notification_users の一覧表示（有効/無効トグル付き）
- * - 各ユーザーの監視条件（エリア×商品）をチェックボックスで設定
+ * - 各ユーザーの監視条件（店舗×商品）をチェックボックスで設定
  * - user_monitoring_conditions の追加/削除をAPI経由で即時反映
  */
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type {
   WatchArea,
   WatchProduct,
   NotificationUser,
   UserMonitoringCondition,
 } from "@/types/database";
+
+/** 店舗情報（エリアから展開したフラット構造） */
+interface FlatStore {
+  store_id: string;
+  store_name: string;
+  area_name: string;
+  postal_code: string;
+  area_is_active: boolean;
+}
 
 interface AdminUsersProps {
   initialUsers: NotificationUser[];
@@ -33,12 +42,32 @@ export default function AdminUsers({
   const [conditions, setConditions] =
     useState<UserMonitoringCondition[]>(initialConditions);
   const [loadingUserId, setLoadingUserId] = useState<string | null>(null);
-  // 処理中のチェックボックスを追跡（"userId:partNumber:areaId" 形式）
+  // 処理中のチェックボックスを追跡（"userId:partNumber:storeId" 形式）
   const [loadingConditions, setLoadingConditions] = useState<Set<string>>(
     new Set()
   );
   // 展開中のユーザーID
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+
+  /**
+   * 全エリアの店舗をフラットなリストに展開
+   * 例: 関東エリア → Apple 銀座, Apple 新宿, ...
+   */
+  const allStores: FlatStore[] = useMemo(() => {
+    const stores: FlatStore[] = [];
+    for (const area of areas) {
+      for (const store of area.stores) {
+        stores.push({
+          store_id: store.store_id,
+          store_name: store.store_name,
+          area_name: area.name,
+          postal_code: area.postal_code,
+          area_is_active: area.is_active,
+        });
+      }
+    }
+    return stores;
+  }, [areas]);
 
   /**
    * ユーザーの is_active を切り替え
@@ -73,12 +102,12 @@ export default function AdminUsers({
    * 監視条件が存在するかチェック
    */
   const hasCondition = useCallback(
-    (userId: string, partNumber: string, areaId: number) => {
+    (userId: string, partNumber: string, storeId: string) => {
       return conditions.some(
         (c) =>
           c.user_id === userId &&
           c.part_number === partNumber &&
-          c.area_id === areaId
+          c.store_id === storeId
       );
     },
     [conditions]
@@ -90,12 +119,12 @@ export default function AdminUsers({
   const toggleCondition = async (
     userId: string,
     partNumber: string,
-    areaId: number
+    storeId: string
   ) => {
-    const condKey = `${userId}:${partNumber}:${areaId}`;
+    const condKey = `${userId}:${partNumber}:${storeId}`;
     setLoadingConditions((prev) => new Set(prev).add(condKey));
 
-    const exists = hasCondition(userId, partNumber, areaId);
+    const exists = hasCondition(userId, partNumber, storeId);
 
     try {
       const res = await fetch("/api/admin/users", {
@@ -104,7 +133,7 @@ export default function AdminUsers({
         body: JSON.stringify({
           user_id: userId,
           part_number: partNumber,
-          area_id: areaId,
+          store_id: storeId,
         }),
       });
 
@@ -118,7 +147,7 @@ export default function AdminUsers({
               !(
                 c.user_id === userId &&
                 c.part_number === partNumber &&
-                c.area_id === areaId
+                c.store_id === storeId
               )
           )
         );
@@ -129,7 +158,7 @@ export default function AdminUsers({
           id: crypto.randomUUID(),
           user_id: userId,
           part_number: partNumber,
-          area_id: areaId,
+          store_id: storeId,
           created_at: new Date().toISOString(),
         };
         setConditions((prev) => [...prev, newCondition]);
@@ -273,25 +302,28 @@ export default function AdminUsers({
                 {/* 監視条件パネル（展開時） */}
                 {isExpanded && (
                   <div className="border-t border-gray-700/40 p-4">
-                    {areas.length === 0 || products.length === 0 ? (
+                    {allStores.length === 0 || products.length === 0 ? (
                       <p className="text-gray-500 text-sm">
-                        エリアまたは商品が登録されていません
+                        店舗または商品が登録されていません
                       </p>
                     ) : (
                       <div className="space-y-5">
-                        {areas.map((area) => (
-                          <div key={area.id}>
-                            {/* エリアヘッダー */}
+                        {allStores.map((store) => (
+                          <div key={store.store_id}>
+                            {/* 店舗ヘッダー */}
                             <div className="flex items-center gap-2 mb-2">
                               <span className="text-sm font-semibold text-gray-300">
-                                📍 {area.name}
+                                🏪 {store.store_name}
                               </span>
                               <span className="text-xs text-gray-500">
-                                〒{area.postal_code}
+                                {store.area_name}
                               </span>
-                              {!area.is_active && (
+                              <span className="text-[10px] text-gray-600">
+                                {store.store_id}
+                              </span>
+                              {!store.area_is_active && (
                                 <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-                                  無効
+                                  エリア無効
                                 </span>
                               )}
                             </div>
@@ -299,11 +331,11 @@ export default function AdminUsers({
                             {/* 商品チェックボックス */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pl-2">
                               {products.map((product) => {
-                                const condKey = `${user.id}:${product.part_number}:${area.id}`;
+                                const condKey = `${user.id}:${product.part_number}:${store.store_id}`;
                                 const isChecked = hasCondition(
                                   user.id,
                                   product.part_number,
-                                  area.id
+                                  store.store_id
                                 );
                                 const isLoading =
                                   loadingConditions.has(condKey);
@@ -329,7 +361,7 @@ export default function AdminUsers({
                                         toggleCondition(
                                           user.id,
                                           product.part_number,
-                                          area.id
+                                          store.store_id
                                         )
                                       }
                                       disabled={isLoading}

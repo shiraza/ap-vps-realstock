@@ -1,6 +1,10 @@
 -- ============================================================
 -- LINE個別通知機能 - テーブル定義
 -- Supabase SQL Editor で実行してください
+--
+-- ※ 既にテーブルが存在する場合は先にDROPしてください:
+--    DROP TABLE IF EXISTS user_monitoring_conditions CASCADE;
+--    DROP TABLE IF EXISTS notification_users CASCADE;
 -- ============================================================
 
 -- ============================================================
@@ -20,32 +24,32 @@ COMMENT ON COLUMN notification_users.is_active    IS 'true=友だち登録中, f
 
 -- ============================================================
 -- 2. user_monitoring_conditions: ユーザーの監視条件
---    どのユーザーがどのエリアのどのモデルを監視するか
+--    どのユーザーがどの店舗のどのモデルを監視するか（店舗レベル）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_monitoring_conditions (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      UUID        NOT NULL REFERENCES notification_users(id) ON DELETE CASCADE,
   part_number  VARCHAR(20) NOT NULL REFERENCES watch_products(part_number) ON DELETE CASCADE,
-  area_id      INTEGER     NOT NULL REFERENCES watch_areas(id) ON DELETE CASCADE,
+  store_id     VARCHAR(20) NOT NULL,             -- 店舗ID（例: "R381" = Apple 新宿）
   created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-  -- 同じユーザーが同じエリア×商品の組み合わせを重複登録できないようにする
-  UNIQUE (user_id, part_number, area_id)
+  -- 同じユーザーが同じ店舗×商品の組み合わせを重複登録できないようにする
+  UNIQUE (user_id, part_number, store_id)
 );
 
-COMMENT ON TABLE  user_monitoring_conditions IS 'ユーザーごとの在庫監視条件';
+COMMENT ON TABLE  user_monitoring_conditions IS 'ユーザーごとの在庫監視条件（店舗レベル）';
 COMMENT ON COLUMN user_monitoring_conditions.user_id     IS 'notification_users への外部キー';
 COMMENT ON COLUMN user_monitoring_conditions.part_number IS 'watch_products への外部キー（監視対象商品）';
-COMMENT ON COLUMN user_monitoring_conditions.area_id     IS 'watch_areas への外部キー（監視対象エリア）';
+COMMENT ON COLUMN user_monitoring_conditions.store_id    IS '店舗ID（watch_areasのstores JSONBに含まれるstore_id）';
 
 -- ============================================================
 -- インデックス
 -- ============================================================
 -- ワーカーからの通知対象検索を高速化するための複合インデックス
-CREATE INDEX idx_umc_part_area ON user_monitoring_conditions (part_number, area_id);
+CREATE INDEX idx_umc_part_store ON user_monitoring_conditions (part_number, store_id);
 -- ユーザー単位の条件一覧取得用
-CREATE INDEX idx_umc_user      ON user_monitoring_conditions (user_id);
+CREATE INDEX idx_umc_user       ON user_monitoring_conditions (user_id);
 -- LINE ユーザーIDでの検索用
-CREATE INDEX idx_nu_line_user   ON notification_users (line_user_id);
+CREATE INDEX idx_nu_line_user    ON notification_users (line_user_id);
 
 -- ============================================================
 -- RLS（Row Level Security）を有効化
