@@ -47,7 +47,8 @@ export default async function AdminPage() {
       .eq("key", "poll_interval")
       .single();
     if (settingsData) {
-      pollInterval = parseInt(settingsData.value, 10) || 20;
+      const parsed = parseInt(settingsData.value, 10);
+      pollInterval = isNaN(parsed) ? 30 : parsed;
     }
 
     // LINE通知ユーザーを取得
