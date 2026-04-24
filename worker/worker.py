@@ -84,10 +84,11 @@ BATCH_DELAY = 2
 # ============================================================
 # インメモリ ステータスキャッシュ
 # キー: "{part_number}:{store_id}", 値: ステータス文字列
-# 初回起動時は空（初回は全て「変化なし」として扱い通知しない）
+# 起動時にDBから前回ステータスを読み込むことで、
+# 再起動後も正しく状態変化を検知できる
 # ============================================================
 last_status_cache: dict[str, str] = {}
-# 初回サイクルフラグ（初回は通知を抑制する）
+# 初回サイクルフラグ（DBからキャッシュ読み込み済みの場合はFalse）
 is_first_cycle = True
 
 
@@ -101,6 +102,43 @@ def init_supabase() -> Client:
             "SUPABASE_URL と SUPABASE_SERVICE_KEY を .env に設定してください"
         )
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+
+def load_initial_cache(supabase: Client) -> int:
+    """
+    起動時にDBの stock_matrix から前回のステータスをキャッシュに読み込む。
+
+    これにより、ワーカー再起動後も前回の状態との差分を正しく検知でき、
+    「UNAVAILABLE → AVAILABLE」のような在庫復活を見逃さない。
+    """
+    global last_status_cache, is_first_cycle
+    try:
+        res = (
+            supabase.table("stock_matrix")
+            .select("part_number, store_id, status")
+            .execute()
+        )
+        rows = res.data or []
+        for row in rows:
+            key = f"{row['part_number']}:{row['store_id']}"
+            last_status_cache[key] = row["status"]
+
+        if rows:
+            # DBにデータがある場合、初回サイクルフラグを解除
+            # → 次のサイクルから即座に状態変化を検知可能
+            is_first_cycle = False
+            logger.info(
+                f"📋 DBから初期キャッシュを読み込みました: {len(rows)} 件\n"
+                f"   → 次のサイクルから在庫変化を検知します"
+            )
+        else:
+            logger.info(
+                "📋 DBにまだ在庫データがありません（初回サイクルとして扱います）"
+            )
+        return len(rows)
+    except Exception as e:
+        logger.warning(f"⚠️ 初期キャッシュの読み込みに失敗: {e}")
+        return 0
 
 
 # ============================================================
@@ -402,11 +440,11 @@ def parse_and_upsert(
             cache_key = f"{pn}:{store_number}"
             old_status = last_status_cache.get(cache_key)
 
-            # UNAVAILABLE → AVAILABLE の変化を検知（初回サイクルは除外）
+            # 非AVAILABLE → AVAILABLE への変化を検知（初回サイクルは除外）
             if (
                 not is_first_cycle
                 and old_status is not None
-                and old_status == "UNAVAILABLE"
+                and old_status != "AVAILABLE"
                 and status == "AVAILABLE"
             ):
                 logger.info(
@@ -416,6 +454,12 @@ def parse_and_upsert(
                 if pn not in stock_alerts:
                     stock_alerts[pn] = []
                 stock_alerts[pn].append((store_number, store_name))
+            elif old_status is not None and old_status != status:
+                # AVAILABLE → UNAVAILABLE などの変化もログ出力（デバッグ用）
+                logger.debug(
+                    f"📊 ステータス変化: {pn} @ {store_name} "
+                    f"({old_status} → {status})"
+                )
 
             # キャッシュを更新
             last_status_cache[cache_key] = status
@@ -476,8 +520,9 @@ def parse_and_upsert(
                 target_ids = get_notification_targets(supabase, pn, sid)
 
                 if not target_ids:
-                    logger.info(
-                        f"ℹ️ {pn} @ {sname} の通知対象ユーザーはいません（スキップ）"
+                    logger.warning(
+                        f"⚠️ {pn} @ {sname} の通知対象ユーザーはいません\n"
+                        f"   → user_monitoring_conditions にこの商品×店舗の登録があるか確認してください"
                     )
                     continue
 
@@ -633,6 +678,11 @@ def main():
     except Exception as e:
         logger.error(f"❌ Supabase接続失敗: {e}")
         return
+
+    # 起動時にDBから前回ステータスをキャッシュに読み込む
+    # これにより再起動後も在庫変化を正しく検知できる
+    cache_count = load_initial_cache(supabase)
+    logger.info(f"📋 初期キャッシュ: {cache_count} 件読み込み済み")
 
     # Proxy設定（必須 — 自IPでのAPI呼び出しは禁止）
     try:
