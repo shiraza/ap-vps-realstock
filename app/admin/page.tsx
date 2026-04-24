@@ -1,13 +1,19 @@
 /**
  * 管理画面: /admin
- * エリア管理、商品管理、ワーカー設定のUI
+ * エリア管理、商品管理、ワーカー設定、LINE通知ユーザー管理のUI
  */
 
 import { getSupabaseServer } from "@/lib/supabase/server";
 import AdminAreas from "@/components/AdminAreas";
 import AdminProducts from "@/components/AdminProducts";
 import AdminWorkerSettings from "@/components/AdminWorkerSettings";
-import type { WatchArea, WatchProduct } from "@/types/database";
+import AdminUsers from "@/components/AdminUsers";
+import type {
+  WatchArea,
+  WatchProduct,
+  NotificationUser,
+  UserMonitoringCondition,
+} from "@/types/database";
 
 // ISRなし（常に最新データを取得）
 export const dynamic = "force-dynamic";
@@ -16,6 +22,8 @@ export default async function AdminPage() {
   let areas: WatchArea[] = [];
   let products: WatchProduct[] = [];
   let pollInterval = 20;
+  let notificationUsers: NotificationUser[] = [];
+  let monitoringConditions: UserMonitoringCondition[] = [];
 
   try {
     const supabase = getSupabaseServer();
@@ -41,6 +49,20 @@ export default async function AdminPage() {
     if (settingsData) {
       pollInterval = parseInt(settingsData.value, 10) || 20;
     }
+
+    // LINE通知ユーザーを取得
+    const { data: usersData } = await supabase
+      .from("notification_users")
+      .select("*")
+      .order("created_at", { ascending: false });
+    notificationUsers = (usersData as NotificationUser[]) || [];
+
+    // 監視条件を取得
+    const { data: conditionsData } = await supabase
+      .from("user_monitoring_conditions")
+      .select("*");
+    monitoringConditions =
+      (conditionsData as UserMonitoringCondition[]) || [];
   } catch (error) {
     console.error("管理画面データ取得エラー:", error);
   }
@@ -69,6 +91,17 @@ export default async function AdminPage() {
 
       {/* 商品管理 */}
       <AdminProducts initialProducts={products} />
+
+      {/* 区切り線 */}
+      <hr className="border-gray-800/50" />
+
+      {/* LINE通知ユーザー管理 */}
+      <AdminUsers
+        initialUsers={notificationUsers}
+        initialConditions={monitoringConditions}
+        areas={areas}
+        products={products}
+      />
     </div>
   );
 }
