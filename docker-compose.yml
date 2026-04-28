@@ -1,0 +1,13 @@
+services:
+  stock-worker:
+    build:
+      context: ./worker
+    container_name: iphone-stock-worker
+    restart: always # エラーやPC再起動時に自動で立ち上がる設定
+    env_file:
+      - ./worker/.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10mb"
+        max-file: "3"

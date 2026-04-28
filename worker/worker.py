@@ -731,6 +731,8 @@ def get_poll_interval(supabase: Client) -> int:
         )
         if res.data and len(res.data) > 0:
             interval = int(res.data[0]["value"])
+            if interval == 0:
+                return 0
             if interval < 5:
                 logger.warning(f"⚠️ ポーリング間隔が短すぎます ({interval}秒)。最低5秒に制限します。")
                 return 5
@@ -898,6 +900,17 @@ def main():
 
     # メインループ
     while True:
+        # 実行前に停止設定か確認
+        interval = get_poll_interval(supabase)
+        if interval == 0:
+            logger.info("⏹️ ポーリング停止中... (60秒後に設定を再確認します)")
+            try:
+                time.sleep(60)
+            except KeyboardInterrupt:
+                logger.info("🛑 ワーカーを停止します（Ctrl+C）")
+                break
+            continue
+
         try:
             cycle_start = time.time()
             run_check_cycle(supabase, proxies)
@@ -912,13 +925,14 @@ def main():
             logger.error(f"❌ 予期しないエラー: {e}", exc_info=True)
 
         # 次のサイクルまで待機（DBから最新の間隔を取得）
-        interval = get_poll_interval(supabase)
-        logger.info(f"💤 {interval}秒後に次のチェックを実行...")
-        try:
-            time.sleep(interval)
-        except KeyboardInterrupt:
-            logger.info("🛑 ワーカーを停止します（Ctrl+C）")
-            break
+        next_interval = get_poll_interval(supabase)
+        if next_interval > 0:
+            logger.info(f"💤 {next_interval}秒後に次のチェックを実行...")
+            try:
+                time.sleep(next_interval)
+            except KeyboardInterrupt:
+                logger.info("🛑 ワーカーを停止します（Ctrl+C）")
+                break
 
 
 if __name__ == "__main__":

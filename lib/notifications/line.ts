@@ -67,7 +67,7 @@ export function buildStockAlertMessage(
   partNumber: string
 ): object {
   // Apple Store の購入ページURL
-  const appleStoreUrl = `https://www.apple.com/jp/shop/buy-iphone`;
+  const appleStoreUrl = `https://www.apple.com/jp/shop/saved-items`;
 
   return {
     type: "flex",
@@ -172,7 +172,7 @@ export function buildStockAlertMessage(
             type: "button",
             action: {
               type: "uri",
-              label: "Apple Store で確認する",
+              label: "保存済みのアイテムを開く",
               uri: appleStoreUrl,
             },
             style: "primary",
