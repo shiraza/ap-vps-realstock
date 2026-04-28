@@ -423,7 +423,10 @@ export default function AdminUsers({
                                         bg-gray-700 cursor-pointer accent-blue-500"
                                     />
                                     <div className="min-w-0">
-                                      <p className="text-xs text-gray-200 truncate">
+                                      <p className="text-xs font-medium text-gray-200 truncate">
+                                        {product.model_name}
+                                      </p>
+                                      <p className="text-[11px] text-gray-400 truncate">
                                         {product.capacity} {product.color}
                                       </p>
                                       <p className="text-[10px] text-gray-500 truncate">

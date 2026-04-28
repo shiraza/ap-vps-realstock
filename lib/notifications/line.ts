@@ -67,7 +67,7 @@ export function buildStockAlertMessage(
   partNumber: string
 ): object {
   // Apple Store の購入ページURL
-  const appleStoreUrl = `https://www.apple.com/jp/shop/saved-items`;
+  const appleStoreUrl = `https://www.apple.com/jp/shop/bag`;
 
   return {
     type: "flex",
@@ -172,7 +172,7 @@ export function buildStockAlertMessage(
             type: "button",
             action: {
               type: "uri",
-              label: "保存済みのアイテムを開く",
+              label: "バッグ（保存済みアイテム）を開く",
               uri: appleStoreUrl,
             },
             style: "primary",
