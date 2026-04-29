@@ -56,21 +56,42 @@ export async function GET() {
 
 /**
  * POST: 監視条件を追加（upsert）
- * body: { user_id, part_number, store_id }
+ * body: { user_id, part_number, store_id } または { user_id, part_numbers: string[], store_id }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, part_number, store_id } = body;
+    const { user_id, part_number, store_id, part_numbers } = body;
 
-    if (!user_id || !part_number || !store_id) {
+    if (!user_id || !store_id || (!part_number && !part_numbers)) {
       return NextResponse.json(
-        { error: "user_id, part_number, store_id は必須です" },
+        { error: "user_id, store_id と part_number または part_numbers が必須です" },
         { status: 400 }
       );
     }
 
     const supabase = getSupabaseServer();
+
+    // 一括追加の場合
+    if (part_numbers && Array.isArray(part_numbers)) {
+      const payload = part_numbers.map((pn) => ({
+        user_id,
+        part_number: pn,
+        store_id,
+      }));
+
+      const { data, error } = await supabase
+        .from("user_monitoring_conditions")
+        .upsert(payload, { onConflict: "user_id,part_number,store_id" })
+        .select();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      return NextResponse.json({ success: true, data });
+    }
+
+    // 単体追加の場合
     const { data, error } = await supabase
       .from("user_monitoring_conditions")
       .upsert(
@@ -95,21 +116,38 @@ export async function POST(request: NextRequest) {
 
 /**
  * DELETE: 監視条件を削除
- * body: { user_id, part_number, store_id }
+ * body: { user_id, part_number, store_id } または { user_id, part_numbers: string[], store_id }
  */
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, part_number, store_id } = body;
+    const { user_id, part_number, store_id, part_numbers } = body;
 
-    if (!user_id || !part_number || !store_id) {
+    if (!user_id || !store_id || (!part_number && !part_numbers)) {
       return NextResponse.json(
-        { error: "user_id, part_number, store_id は必須です" },
+        { error: "user_id, store_id と part_number または part_numbers が必須です" },
         { status: 400 }
       );
     }
 
     const supabase = getSupabaseServer();
+
+    // 一括削除の場合
+    if (part_numbers && Array.isArray(part_numbers)) {
+      const { error } = await supabase
+        .from("user_monitoring_conditions")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("store_id", store_id)
+        .in("part_number", part_numbers);
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // 単体削除の場合
     const { error } = await supabase
       .from("user_monitoring_conditions")
       .delete()

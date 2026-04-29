@@ -176,6 +176,58 @@ export default function AdminUsers({
   };
 
   /**
+   * 監視条件の店舗一括トグル（追加 or 削除）
+   */
+  const toggleStoreConditions = async (
+    userId: string,
+    storeId: string,
+    isSelectAll: boolean
+  ) => {
+    const storeKey = `store:${userId}:${storeId}`;
+    setLoadingConditions((prev) => new Set(prev).add(storeKey));
+
+    const allPartNumbers = products.map((p) => p.part_number);
+
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: isSelectAll ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          part_numbers: allPartNumbers,
+          store_id: storeId,
+        }),
+      });
+
+      if (!res.ok) throw new Error("一括更新に失敗しました");
+
+      if (!isSelectAll) {
+        setConditions((prev) =>
+          prev.filter((c) => !(c.user_id === userId && c.store_id === storeId))
+        );
+      } else {
+        const result = await res.json();
+        const newConditions: UserMonitoringCondition[] = result.data || [];
+        setConditions((prev) => {
+          const others = prev.filter(
+            (c) => !(c.user_id === userId && c.store_id === storeId)
+          );
+          return [...others, ...newConditions];
+        });
+      }
+    } catch (err) {
+      console.error("監視条件一括更新エラー:", err);
+      alert("一括更新に失敗しました。もう一度お試しください。");
+    } finally {
+      setLoadingConditions((prev) => {
+        const next = new Set(prev);
+        next.delete(storeKey);
+        return next;
+      });
+    }
+  };
+
+  /**
    * ユーザーの監視条件数を取得
    */
   const getConditionCount = (userId: string) => {
@@ -364,7 +416,7 @@ export default function AdminUsers({
                         {allStores.map((store) => (
                           <div key={store.store_id}>
                             {/* 店舗ヘッダー */}
-                            <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <span className="text-sm font-semibold text-gray-300">
                                 🏪 {store.store_name}
                               </span>
@@ -379,6 +431,23 @@ export default function AdminUsers({
                                   エリア無効
                                 </span>
                               )}
+                              {/* 一括操作ボタン */}
+                              <div className="ml-auto flex items-center gap-2">
+                                <button
+                                  onClick={() => toggleStoreConditions(user.id, store.store_id, true)}
+                                  disabled={loadingConditions.has(`store:${user.id}:${store.store_id}`)}
+                                  className="text-xs px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                                >
+                                  すべて選択
+                                </button>
+                                <button
+                                  onClick={() => toggleStoreConditions(user.id, store.store_id, false)}
+                                  disabled={loadingConditions.has(`store:${user.id}:${store.store_id}`)}
+                                  className="text-xs px-2 py-1 rounded bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors disabled:opacity-50"
+                                >
+                                  すべて解除
+                                </button>
+                              </div>
                             </div>
 
                             {/* 商品チェックボックス */}
@@ -390,8 +459,9 @@ export default function AdminUsers({
                                   product.part_number,
                                   store.store_id
                                 );
+                                const storeKey = `store:${user.id}:${store.store_id}`;
                                 const isLoading =
-                                  loadingConditions.has(condKey);
+                                  loadingConditions.has(condKey) || loadingConditions.has(storeKey);
 
                                 return (
                                   <label
