@@ -76,7 +76,7 @@ export function buildStockAlertMessage(items: StockAlertItem[]): object {
     storeMap.get(shortStoreName)!.push(item.modelName);
   });
 
-  let text = "🍎 在庫復活のお知らせ\n\n";
+  let text = "";
 
   for (const [store, models] of storeMap.entries()) {
     text += `【${store}】\n`;
