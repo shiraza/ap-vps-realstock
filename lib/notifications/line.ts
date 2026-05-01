@@ -105,8 +105,6 @@ export function buildStockAlertMessage(items: StockAlertItem[]): object {
     text += "\n";
   }
 
-  text += "※ 在庫は常に変動します。お早めにご確認ください。";
-
   return {
     type: "text",
     text: text.trim(),
