@@ -66,18 +66,49 @@ export interface StockAlertItem {
  * @returns LINE Flex Message オブジェクト
  */
 export function buildStockAlertMessage(items: StockAlertItem[]): object {
-  let text = "🍎 在庫復活のお知らせ\n\n";
+  const storeMap = new Map<string, string[]>();
 
   items.forEach((item) => {
-    text += `【${item.modelName}】\n`;
-    text += `📍 店舗: ${item.storeName}\n`;
-    text += `🏷️ 型番: ${item.partNumber}\n\n`;
+    const shortStoreName = item.storeName.replace("Apple ", "");
+    if (!storeMap.has(shortStoreName)) {
+      storeMap.set(shortStoreName, []);
+    }
+    storeMap.get(shortStoreName)!.push(item.modelName);
   });
+
+  let text = "🍎 在庫復活のお知らせ\n\n";
+
+  for (const [store, models] of storeMap.entries()) {
+    text += `【${store}】\n`;
+    
+    // カスタムソート: ★Max -> ●Max -> Pro -> その他
+    models.sort((a, b) => {
+      const getPriority = (name: string) => {
+        if (name.includes("★Max")) return 1;
+        if (name.includes("●Max")) return 2;
+        if (name.includes("Pro")) return 3;
+        return 4;
+      };
+      
+      const priorityA = getPriority(a);
+      const priorityB = getPriority(b);
+      
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      return a.localeCompare(b, 'ja');
+    });
+
+    models.forEach((model) => {
+      text += `${model}\n`;
+    });
+    text += "\n";
+  }
 
   text += "※ 在庫は常に変動します。お早めにご確認ください。";
 
   return {
     type: "text",
-    text: text,
+    text: text.trim(),
   };
 }
