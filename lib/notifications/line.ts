@@ -66,144 +66,18 @@ export interface StockAlertItem {
  * @returns LINE Flex Message オブジェクト
  */
 export function buildStockAlertMessage(items: StockAlertItem[]): object {
-  const itemContents: any[] = [];
+  let text = "🍎 在庫復活のお知らせ\n\n";
 
-  items.forEach((item, index) => {
-    itemContents.push({
-      type: "box",
-      layout: "vertical",
-      margin: index === 0 ? "none" : "xl",
-      contents: [
-        {
-          type: "text",
-          text: item.modelName,
-          weight: "bold",
-          size: "lg",
-          wrap: true,
-        },
-        {
-          type: "box",
-          layout: "vertical",
-          margin: "md",
-          spacing: "sm",
-          contents: [
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                {
-                  type: "text",
-                  text: "📍 店舗",
-                  size: "sm",
-                  color: "#888888",
-                  flex: 2,
-                },
-                {
-                  type: "text",
-                  text: item.storeName,
-                  size: "sm",
-                  weight: "bold",
-                  flex: 5,
-                  wrap: true,
-                },
-              ],
-            },
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                {
-                  type: "text",
-                  text: "🏷️ 型番",
-                  size: "sm",
-                  color: "#888888",
-                  flex: 2,
-                },
-                {
-                  type: "text",
-                  text: item.partNumber,
-                  size: "sm",
-                  flex: 5,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-
-    // 最後のアイテムでなければ区切り線を入れる
-    if (index < items.length - 1) {
-      itemContents.push({
-        type: "separator",
-        margin: "xl",
-      });
-    }
+  items.forEach((item) => {
+    text += `【${item.modelName}】\n`;
+    text += `📍 店舗: ${item.storeName}\n`;
+    text += `🏷️ 型番: ${item.partNumber}\n\n`;
   });
 
-  const altText =
-    items.length > 1
-      ? `🍎 在庫復活: ${items[0].modelName} ほか計${items.length}件`
-      : `🍎 在庫復活: ${items[0].modelName} @ ${items[0].storeName}`;
+  text += "※ 在庫は常に変動します。お早めにご確認ください。";
 
   return {
-    type: "flex",
-    altText: altText,
-    contents: {
-      type: "bubble",
-      size: "mega",
-      header: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          {
-            type: "text",
-            text: "🍎 在庫復活！",
-            weight: "bold",
-            size: "xl",
-            color: "#1DB446",
-          },
-        ],
-        backgroundColor: "#F0FFF0",
-        paddingAll: "15px",
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          ...itemContents,
-          {
-            type: "separator",
-            margin: "xl",
-          },
-          {
-            type: "text",
-            text: "※ 在庫は常に変動します。お早めにご確認ください。",
-            size: "xs",
-            color: "#999999",
-            margin: "md",
-            wrap: true,
-          },
-        ],
-        paddingAll: "15px",
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          {
-            type: "button",
-            style: "primary",
-            color: "#0066CC",
-            action: {
-              type: "uri",
-              label: "バッグ（保存済みアイテム）を開く",
-              uri: "https://www.apple.com/jp/shop/bag",
-            },
-          },
-        ],
-        paddingAll: "15px",
-      },
-    },
+    type: "text",
+    text: text,
   };
 }

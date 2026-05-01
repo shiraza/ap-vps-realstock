@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
     // 全ユーザーへの送信が失敗した場合、ワーカー側で再試行させるために500エラーを返す
     if (successCount === 0 && failureCount > 0) {
       return NextResponse.json(
-        { error: "すべてのLINE通知に失敗しました" },
+        { error: "すべてのLINE通知に失敗しました", details: errors },
         { status: 500 }
       );
     }
