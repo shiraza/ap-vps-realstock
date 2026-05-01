@@ -66,9 +66,6 @@ export interface StockAlertItem {
  * @returns LINE Flex Message オブジェクト
  */
 export function buildStockAlertMessage(items: StockAlertItem[]): object {
-  // Apple Store の購入ページURL
-  const appleStoreUrl = `https://www.apple.com/jp/shop/bag`;
-
   const itemContents: any[] = [];
 
   items.forEach((item, index) => {
@@ -186,24 +183,6 @@ export function buildStockAlertMessage(items: StockAlertItem[]): object {
             color: "#999999",
             margin: "md",
             wrap: true,
-          },
-        ],
-        paddingAll: "15px",
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          {
-            type: "button",
-            action: {
-              type: "uri",
-              label: "バッグ（保存済みアイテム）を開く",
-              uri: appleStoreUrl,
-            },
-            style: "primary",
-            color: "#0071E3",
-            height: "sm",
           },
         ],
         paddingAll: "15px",
