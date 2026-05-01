@@ -187,6 +187,23 @@ export function buildStockAlertMessage(items: StockAlertItem[]): object {
         ],
         paddingAll: "15px",
       },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: "#0066CC",
+            action: {
+              type: "uri",
+              label: "バッグ（保存済みアイテム）を開く",
+              uri: "https://www.apple.com/jp/shop/bag",
+            },
+          },
+        ],
+        paddingAll: "15px",
+      },
     },
   };
 }

@@ -93,11 +93,27 @@ export async function POST(request: NextRequest) {
     for (const [lineUserId, items] of Array.from(userAlertsMap.entries())) {
       if (items.length === 0) continue;
 
-      // ユーザーごとにまとめてFlex Messageを生成
-      const message = buildStockAlertMessage(items);
+      // LINE Flex Messageの要素数制限（100件程度）を回避するため、
+      // 1つのメッセージにつき最大10件の商品に分割する
+      const maxItemsPerMessage = 10;
+      const flexMessages = [];
+      for (let i = 0; i < items.length; i += maxItemsPerMessage) {
+        const chunk = items.slice(i, i + maxItemsPerMessage);
+        flexMessages.push(buildStockAlertMessage(chunk));
+      }
 
-      const ok = await sendLinePushMessage(lineUserId, [message]);
-      if (ok) {
+      // LINE push APIは1回のリクエストで最大5メッセージまで送信可能
+      const maxMessagesPerPush = 5;
+      let userSuccess = true;
+      for (let i = 0; i < flexMessages.length; i += maxMessagesPerPush) {
+        const pushChunk = flexMessages.slice(i, i + maxMessagesPerPush);
+        const ok = await sendLinePushMessage(lineUserId, pushChunk);
+        if (!ok) {
+          userSuccess = false;
+        }
+      }
+
+      if (userSuccess) {
         successCount++;
       } else {
         failureCount++;
@@ -109,6 +125,14 @@ export async function POST(request: NextRequest) {
       `📨 LINE一括通知送信完了: 成功(ユーザー数)=${successCount}, 失敗=${failureCount}`,
       { itemsProcessed: alerts.length }
     );
+
+    // 全ユーザーへの送信が失敗した場合、ワーカー側で再試行させるために500エラーを返す
+    if (successCount === 0 && failureCount > 0) {
+      return NextResponse.json(
+        { error: "すべてのLINE通知に失敗しました" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
