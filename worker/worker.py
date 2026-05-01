@@ -195,6 +195,9 @@ def recover_pending_notifications(supabase: Client) -> int:
             p["part_number"]: p for p in (products_res.data or [])
         }
 
+        alerts_payload = []
+        mark_notified_list = []
+
         sent_count = 0
         for row in pending:
             pn = row["part_number"]
@@ -215,11 +218,20 @@ def recover_pending_notifications(supabase: Client) -> int:
             capacity = product.get("capacity", "")
             color = product.get("color", "")
             short_model = model_name
-            if "Pro Max" in model_name or "ProMax" in model_name:
-                short_model = "ProMax"
-            elif "Pro" in model_name:
-                short_model = "Pro"
+            is_pro_max = "Pro Max" in model_name or "ProMax" in model_name
+            is_pro = not is_pro_max and "Pro" in model_name
             short_cap = capacity.replace("GB", "").replace("TB", "TB")
+
+            if is_pro_max:
+                if short_cap == "256":
+                    short_model = "★Max"
+                elif short_cap == "512":
+                    short_model = "●Max"
+                else:
+                    short_model = "Max"
+            elif is_pro:
+                short_model = "Pro"
+
             short_color = color
             for orig, repl in [
                 ("コズミックオレンジ", "オレンジ"),
@@ -228,16 +240,21 @@ def recover_pending_notifications(supabase: Client) -> int:
                 short_color = short_color.replace(orig, repl)
             full_model_name = f"{short_model}{short_cap}{short_color}"
 
-            logger.info(f"  📨 回復通知: {full_model_name} @ {sname} → {len(target_ids)} 人")
-            ok = send_notification(
-                model_name=full_model_name,
-                store_name=sname,
-                part_number=pn,
-                target_line_user_ids=target_ids,
-            )
+            logger.info(f"  📨 回復通知準備: {full_model_name} @ {sname} → {len(target_ids)} 人")
+            alerts_payload.append({
+                "modelName": full_model_name,
+                "storeName": sname,
+                "partNumber": pn,
+                "targetLineUserIds": target_ids,
+            })
+            mark_notified_list.append((pn, sid))
+
+        if alerts_payload:
+            ok = send_notification(alerts_payload)
             if ok:
-                mark_notified(supabase, pn, sid)
-                sent_count += 1
+                for pn, sid in mark_notified_list:
+                    mark_notified(supabase, pn, sid)
+                sent_count = len(mark_notified_list)
 
         logger.info(f"✅ 回復通知完了: {sent_count}/{len(pending)} 件送信")
         return sent_count
@@ -468,20 +485,12 @@ def get_notification_targets(
 # ============================================================
 # Next.js 通知APIへのリクエスト送信
 # ============================================================
-def send_notification(
-    model_name: str,
-    store_name: str,
-    part_number: str,
-    target_line_user_ids: list[str],
-) -> bool:
+def send_notification(alerts: list[dict]) -> bool:
     """
     Next.js の通知API (/api/notify) にPOSTリクエストを送信する
 
     Args:
-        model_name: モデル名（例: "iPhone 17 Pro Max 256GB シルバー"）
-        store_name: 店舗名（例: "Apple 銀座"）
-        part_number: パーツ番号（例: "MFY84J/A"）
-        target_line_user_ids: 通知対象のLINEユーザーIDリスト
+        alerts: [{"modelName": "...", "storeName": "...", "partNumber": "...", "targetLineUserIds": [...]}, ...]
 
     Returns:
         送信成功: True, 失敗: False
@@ -493,15 +502,15 @@ def send_notification(
     if not NOTIFY_API_SECRET:
         logger.warning("⚠️ NOTIFY_API_SECRET が設定されていません。通知をスキップします。")
         return False
+        
+    if not alerts:
+        return True
 
     try:
         response = requests.post(
             NOTIFY_API_URL,
             json={
-                "modelName": model_name,
-                "storeName": store_name,
-                "partNumber": part_number,
-                "targetLineUserIds": target_line_user_ids,
+                "alerts": alerts
             },
             headers={
                 "Authorization": f"Bearer {NOTIFY_API_SECRET}",
@@ -659,6 +668,9 @@ def parse_and_upsert(
     # ---- 在庫復活通知の送信 ----
     if stock_alerts:
         logger.info(f"🔔 在庫復活を {sum(len(v) for v in stock_alerts.values())} 件検知")
+        alerts_payload = []
+        mark_notified_list = []
+
         for pn, store_infos in stock_alerts.items():
             # 商品情報を取得
             product = product_info_map.get(pn, {})
@@ -666,14 +678,21 @@ def parse_and_upsert(
             capacity = product.get("capacity", "")
             color = product.get("color", "")
 
-            # 短縮名を生成（例: "Pro256シルバー", "ProMax512オレンジ"）
             short_model = model_name
-            if "Pro Max" in model_name or "ProMax" in model_name:
-                short_model = "ProMax"
-            elif "Pro" in model_name:
+            is_pro_max = "Pro Max" in model_name or "ProMax" in model_name
+            is_pro = not is_pro_max and "Pro" in model_name
+            short_cap = capacity.replace("GB", "").replace("TB", "TB")
+
+            if is_pro_max:
+                if short_cap == "256":
+                    short_model = "★Max"
+                elif short_cap == "512":
+                    short_model = "●Max"
+                else:
+                    short_model = "Max"
+            elif is_pro:
                 short_model = "Pro"
 
-            short_cap = capacity.replace("GB", "").replace("TB", "TB")
             short_color = color
             for orig, repl in [
                 ("コズミックオレンジ", "オレンジ"),
@@ -683,7 +702,7 @@ def parse_and_upsert(
 
             full_model_name = f"{short_model}{short_cap}{short_color}"
 
-            # 店舗ごとに通知対象を検索して送信
+            # 店舗ごとに通知対象を検索して送信準備
             for sid, sname in store_infos:
                 # 店舗ID + パーツ番号で通知対象ユーザーを取得
                 target_ids = get_notification_targets(supabase, pn, sid)
@@ -698,17 +717,22 @@ def parse_and_upsert(
                     continue
 
                 logger.info(
-                    f"📨 通知送信: {full_model_name} @ {sname} "
+                    f"📨 通知準備: {full_model_name} @ {sname} "
                     f"→ {len(target_ids)} 人"
                 )
-                ok = send_notification(
-                    model_name=full_model_name,
-                    store_name=sname,
-                    part_number=pn,
-                    target_line_user_ids=target_ids,
-                )
-                # 通知成功時にDBのnotifiedフラグを更新
-                if ok:
+                alerts_payload.append({
+                    "modelName": full_model_name,
+                    "storeName": sname,
+                    "partNumber": pn,
+                    "targetLineUserIds": target_ids,
+                })
+                mark_notified_list.append((pn, sid))
+
+        if alerts_payload:
+            ok = send_notification(alerts_payload)
+            # 通知成功時にDBのnotifiedフラグを更新
+            if ok:
+                for pn, sid in mark_notified_list:
                     mark_notified(supabase, pn, sid)
 
     return total_upserted

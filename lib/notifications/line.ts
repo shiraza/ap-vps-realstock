@@ -53,25 +53,105 @@ export async function sendLinePushMessage(
   }
 }
 
+export interface StockAlertItem {
+  modelName: string;
+  storeName: string;
+  partNumber: string;
+}
+
 /**
- * 在庫復活通知用のFlex Messageを生成する
+ * 在庫復活通知用のFlex Messageを生成する（複数アイテム対応）
  *
- * @param modelName - モデル名（例: "iPhone 17 Pro Max 256GB シルバー"）
- * @param storeName - 店舗名（例: "Apple 銀座"）
- * @param partNumber - パーツ番号（例: "MFY84J/A"）
+ * @param items - 復活した在庫アイテムのリスト
  * @returns LINE Flex Message オブジェクト
  */
-export function buildStockAlertMessage(
-  modelName: string,
-  storeName: string,
-  partNumber: string
-): object {
+export function buildStockAlertMessage(items: StockAlertItem[]): object {
   // Apple Store の購入ページURL
   const appleStoreUrl = `https://www.apple.com/jp/shop/bag`;
 
+  const itemContents: any[] = [];
+
+  items.forEach((item, index) => {
+    itemContents.push({
+      type: "box",
+      layout: "vertical",
+      margin: index === 0 ? "none" : "xl",
+      contents: [
+        {
+          type: "text",
+          text: item.modelName,
+          weight: "bold",
+          size: "lg",
+          wrap: true,
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          margin: "md",
+          spacing: "sm",
+          contents: [
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                {
+                  type: "text",
+                  text: "📍 店舗",
+                  size: "sm",
+                  color: "#888888",
+                  flex: 2,
+                },
+                {
+                  type: "text",
+                  text: item.storeName,
+                  size: "sm",
+                  weight: "bold",
+                  flex: 5,
+                  wrap: true,
+                },
+              ],
+            },
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                {
+                  type: "text",
+                  text: "🏷️ 型番",
+                  size: "sm",
+                  color: "#888888",
+                  flex: 2,
+                },
+                {
+                  type: "text",
+                  text: item.partNumber,
+                  size: "sm",
+                  flex: 5,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // 最後のアイテムでなければ区切り線を入れる
+    if (index < items.length - 1) {
+      itemContents.push({
+        type: "separator",
+        margin: "xl",
+      });
+    }
+  });
+
+  const altText =
+    items.length > 1
+      ? `🍎 在庫復活: ${items[0].modelName} ほか計${items.length}件`
+      : `🍎 在庫復活: ${items[0].modelName} @ ${items[0].storeName}`;
+
   return {
     type: "flex",
-    altText: `🍎 在庫復活: ${modelName} @ ${storeName}`,
+    altText: altText,
     contents: {
       type: "bubble",
       size: "mega",
@@ -94,64 +174,10 @@ export function buildStockAlertMessage(
         type: "box",
         layout: "vertical",
         contents: [
-          {
-            type: "text",
-            text: modelName,
-            weight: "bold",
-            size: "lg",
-            wrap: true,
-          },
+          ...itemContents,
           {
             type: "separator",
-            margin: "md",
-          },
-          {
-            type: "box",
-            layout: "vertical",
-            margin: "md",
-            spacing: "sm",
-            contents: [
-              {
-                type: "box",
-                layout: "horizontal",
-                contents: [
-                  {
-                    type: "text",
-                    text: "📍 店舗",
-                    size: "sm",
-                    color: "#888888",
-                    flex: 2,
-                  },
-                  {
-                    type: "text",
-                    text: storeName,
-                    size: "sm",
-                    weight: "bold",
-                    flex: 5,
-                    wrap: true,
-                  },
-                ],
-              },
-              {
-                type: "box",
-                layout: "horizontal",
-                contents: [
-                  {
-                    type: "text",
-                    text: "🏷️ 型番",
-                    size: "sm",
-                    color: "#888888",
-                    flex: 2,
-                  },
-                  {
-                    type: "text",
-                    text: partNumber,
-                    size: "sm",
-                    flex: 5,
-                  },
-                ],
-              },
-            ],
+            margin: "xl",
           },
           {
             type: "text",

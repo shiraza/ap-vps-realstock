@@ -9,14 +9,19 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   sendLinePushMessage,
   buildStockAlertMessage,
+  StockAlertItem,
 } from "@/lib/notifications/line";
 
 // リクエストボディの型定義
-interface NotifyRequestBody {
+interface StockAlert {
   modelName: string;       // モデル名（例: "iPhone 17 Pro Max 256GB シルバー"）
   storeName: string;       // 店舗名（例: "Apple 銀座"）
   partNumber: string;      // パーツ番号（例: "MFY84J/A"）
   targetLineUserIds: string[];  // 通知対象のLINEユーザーIDリスト
+}
+
+interface NotifyRequestBody {
+  alerts: StockAlert[];
 }
 
 /**
@@ -47,32 +52,50 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: NotifyRequestBody = await request.json();
-    const { modelName, storeName, partNumber, targetLineUserIds } = body;
+    const { alerts } = body;
 
     // バリデーション
-    if (!modelName || !storeName || !partNumber) {
+    if (!alerts || !Array.isArray(alerts) || alerts.length === 0) {
       return NextResponse.json(
-        { error: "modelName, storeName, partNumber は必須です" },
+        { error: "alerts配列は必須です" },
         { status: 400 }
       );
     }
 
-    if (!Array.isArray(targetLineUserIds) || targetLineUserIds.length === 0) {
-      return NextResponse.json(
-        { error: "targetLineUserIds は1人以上必要です" },
-        { status: 400 }
-      );
+    // ユーザーごとに通知内容をグループ化する
+    const userAlertsMap = new Map<string, StockAlertItem[]>();
+
+    for (const alert of alerts) {
+      if (!alert.modelName || !alert.storeName || !alert.partNumber) {
+        continue;
+      }
+      if (!Array.isArray(alert.targetLineUserIds) || alert.targetLineUserIds.length === 0) {
+        continue;
+      }
+
+      for (const lineUserId of alert.targetLineUserIds) {
+        if (!userAlertsMap.has(lineUserId)) {
+          userAlertsMap.set(lineUserId, []);
+        }
+        userAlertsMap.get(lineUserId)!.push({
+          modelName: alert.modelName,
+          storeName: alert.storeName,
+          partNumber: alert.partNumber,
+        });
+      }
     }
 
-    // Flex Messageを生成
-    const message = buildStockAlertMessage(modelName, storeName, partNumber);
-
-    // 各ユーザーにpush送信
     let successCount = 0;
     let failureCount = 0;
     const errors: string[] = [];
 
-    for (const lineUserId of targetLineUserIds) {
+    // ユーザーごとにまとめて送信
+    for (const [lineUserId, items] of Array.from(userAlertsMap.entries())) {
+      if (items.length === 0) continue;
+
+      // ユーザーごとにまとめてFlex Messageを生成
+      const message = buildStockAlertMessage(items);
+
       const ok = await sendLinePushMessage(lineUserId, [message]);
       if (ok) {
         successCount++;
@@ -83,8 +106,8 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(
-      `📨 LINE通知送信完了: 成功=${successCount}, 失敗=${failureCount}`,
-      { modelName, storeName, partNumber }
+      `📨 LINE一括通知送信完了: 成功(ユーザー数)=${successCount}, 失敗=${failureCount}`,
+      { itemsProcessed: alerts.length }
     );
 
     return NextResponse.json({
