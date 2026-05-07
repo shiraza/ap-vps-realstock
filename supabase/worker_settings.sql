@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS worker_settings (
   key   VARCHAR(50) PRIMARY KEY,
-  value VARCHAR(200) NOT NULL
+  value TEXT NOT NULL
 );
 
 COMMENT ON TABLE worker_settings IS 'ワーカーの動的設定（管理画面から変更可能）';

@@ -7,6 +7,7 @@ import { getSupabaseServer } from "@/lib/supabase/server";
 import AdminAreas from "@/components/AdminAreas";
 import AdminProducts from "@/components/AdminProducts";
 import AdminWorkerSettings from "@/components/AdminWorkerSettings";
+import AdminPollSchedule from "@/components/AdminPollSchedule";
 import AdminUsers from "@/components/AdminUsers";
 import type {
   WatchArea,
@@ -22,6 +23,18 @@ export default async function AdminPage() {
   let areas: WatchArea[] = [];
   let products: WatchProduct[] = [];
   let pollInterval = 30;
+  let pollSchedule = {
+    enabled: false,
+    schedule: {
+      mon: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      tue: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      wed: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      thu: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      fri: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      sat: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+      sun: [8,9,10,11,12,13,14,15,16,17,18,19,20],
+    },
+  };
   let notificationUsers: NotificationUser[] = [];
   let monitoringConditions: UserMonitoringCondition[] = [];
 
@@ -49,6 +62,20 @@ export default async function AdminPage() {
     if (settingsData) {
       const parsed = parseInt(settingsData.value, 10);
       pollInterval = isNaN(parsed) ? 30 : parsed;
+    }
+
+    // 配信スケジュールを取得
+    const { data: scheduleData } = await supabase
+      .from("worker_settings")
+      .select("value")
+      .eq("key", "poll_schedule")
+      .single();
+    if (scheduleData) {
+      try {
+        pollSchedule = JSON.parse(scheduleData.value);
+      } catch {
+        // パースに失敗した場合はデフォルト値を使用
+      }
     }
 
     // LINE通知ユーザーを取得
@@ -80,6 +107,12 @@ export default async function AdminPage() {
 
       {/* ワーカー設定 */}
       <AdminWorkerSettings initialInterval={pollInterval} />
+
+      {/* 区切り線 */}
+      <hr className="border-gray-800/50" />
+
+      {/* 配信スケジュール */}
+      <AdminPollSchedule initialSchedule={pollSchedule} />
 
       {/* 区切り線 */}
       <hr className="border-gray-800/50" />

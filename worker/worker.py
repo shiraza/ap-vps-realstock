@@ -25,7 +25,7 @@ import os
 import time
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
 import requests
@@ -757,13 +757,75 @@ def get_poll_interval(supabase: Client) -> int:
             interval = int(res.data[0]["value"])
             if interval == 0:
                 return 0
-            if interval < 5:
-                logger.warning(f"⚠️ ポーリング間隔が短すぎます ({interval}秒)。最低5秒に制限します。")
-                return 5
+            if interval < 3:
+                logger.warning(f"⚠️ ポーリング間隔が短すぎます ({interval}秒)。最低3秒に制限します。")
+                return 3
             return interval
     except Exception as e:
         logger.warning(f"⚠️ ポーリング間隔の取得に失敗: {e}")
     return DEFAULT_POLL_INTERVAL
+
+
+# 日本時間（JST = UTC+9）
+JST = timezone(timedelta(hours=9))
+
+# 曜日インデックス → スケジュールキーのマッピング（Pythonの weekday(): 0=月, 1=火, ...）
+DAY_KEY_MAP = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def get_poll_schedule(supabase: Client) -> dict | None:
+    """
+    DBから配信スケジュール設定を取得する
+
+    Returns:
+        スケジュールデータ（辞書）またはNone（未設定/無効の場合）
+        {
+            "enabled": true/false,
+            "schedule": {
+                "mon": [8,9,10,...],
+                "tue": [8,9,10,...],
+                ...
+            }
+        }
+    """
+    try:
+        res = (
+            supabase.table("worker_settings")
+            .select("value")
+            .eq("key", "poll_schedule")
+            .execute()
+        )
+        if res.data and len(res.data) > 0:
+            schedule = json.loads(res.data[0]["value"])
+            return schedule
+    except Exception as e:
+        logger.warning(f"⚠️ 配信スケジュールの取得に失敗: {e}")
+    return None
+
+
+def is_within_schedule(schedule_data: dict | None) -> bool:
+    """
+    現在の日本時間がスケジュール内かどうかを判定する
+
+    Args:
+        schedule_data: get_poll_schedule() の戻り値
+
+    Returns:
+        True: スケジュール内（ポーリングを実行すべき）
+        False: スケジュール外（ポーリングを停止すべき）
+    """
+    # スケジュールが未設定または無効の場合は常にTrue（従来通りの動作）
+    if schedule_data is None or not schedule_data.get("enabled", False):
+        return True
+
+    now_jst = datetime.now(JST)
+    day_key = DAY_KEY_MAP[now_jst.weekday()]  # 0=月 → "mon"
+    current_hour = now_jst.hour
+
+    schedule = schedule_data.get("schedule", {})
+    allowed_hours = schedule.get(day_key, [])
+
+    return current_hour in allowed_hours
 
 
 def run_check_cycle(supabase: Client, proxies: dict) -> None:
@@ -928,6 +990,21 @@ def main():
         interval = get_poll_interval(supabase)
         if interval == 0:
             logger.info("⏹️ ポーリング停止中... (60秒後に設定を再確認します)")
+            try:
+                time.sleep(60)
+            except KeyboardInterrupt:
+                logger.info("🛑 ワーカーを停止します（Ctrl+C）")
+                break
+            continue
+
+        # 配信スケジュールの確認（日本時間ベース）
+        schedule_data = get_poll_schedule(supabase)
+        if not is_within_schedule(schedule_data):
+            now_jst = datetime.now(JST)
+            logger.info(
+                f"📅 スケジュール外のため待機中... "
+                f"(現在: {now_jst.strftime('%A %H:%M')} JST、60秒後に再確認)"
+            )
             try:
                 time.sleep(60)
             except KeyboardInterrupt:

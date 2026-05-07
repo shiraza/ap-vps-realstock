@@ -13,6 +13,8 @@ interface AdminWorkerSettingsProps {
 
 const INTERVAL_OPTIONS = [
   { value: 0, label: "⏹ 停止" },
+  { value: 3, label: "3秒" },
+  { value: 5, label: "5秒" },
   { value: 10, label: "10秒" },
   { value: 15, label: "15秒" },
   { value: 20, label: "20秒" },
