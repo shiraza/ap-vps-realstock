@@ -169,25 +169,58 @@ export async function DELETE(request: NextRequest) {
 }
 
 /**
- * PATCH: 通知ユーザーの is_active を切り替え
- * body: { id, is_active }
+ * PATCH: 通知ユーザーの設定を更新
+ * body: { id, is_active } または { id, notify_days }
  */
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, is_active } = body;
+    const { id, is_active, notify_days } = body;
 
-    if (!id || is_active === undefined) {
+    if (!id) {
       return NextResponse.json(
-        { error: "id と is_active が必要です" },
+        { error: "id が必要です" },
         { status: 400 }
       );
+    }
+
+    // is_active と notify_days のどちらも未指定の場合はエラー
+    if (is_active === undefined && notify_days === undefined) {
+      return NextResponse.json(
+        { error: "is_active または notify_days が必要です" },
+        { status: 400 }
+      );
+    }
+
+    // 更新するフィールドを動的に構築
+    const updatePayload: Record<string, unknown> = {};
+
+    if (is_active !== undefined) {
+      updatePayload.is_active = is_active;
+    }
+
+    if (notify_days !== undefined) {
+      // バリデーション: notify_days は null またはオブジェクト形式
+      if (notify_days !== null) {
+        const validDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+        if (
+          typeof notify_days.enabled !== "boolean" ||
+          !Array.isArray(notify_days.days) ||
+          !notify_days.days.every((d: unknown) => validDays.includes(d as string))
+        ) {
+          return NextResponse.json(
+            { error: "notify_days の形式が不正です（{ enabled: boolean, days: string[] } が必要）" },
+            { status: 400 }
+          );
+        }
+      }
+      updatePayload.notify_days = notify_days;
     }
 
     const supabase = getSupabaseServer();
     const { error } = await supabase
       .from("notification_users")
-      .update({ is_active })
+      .update(updatePayload)
       .eq("id", id);
 
     if (error) {

@@ -36,6 +36,15 @@ export interface StockMatrixRow {
   updated_at: string;  // ISO 8601
 }
 
+/** 曜日キー */
+export type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** 通知可能曜日の設定 */
+export interface NotifyDays {
+  enabled: boolean;      // true のときのみ曜日制限が有効
+  days: DayKey[];        // 通知する曜日のリスト（例: ["mon", "wed", "fri"]）
+}
+
 /** notification_users テーブルの行 */
 export interface NotificationUser {
   id: string;              // UUID
@@ -43,6 +52,7 @@ export interface NotificationUser {
   display_name: string | null;  // LINEの表示名
   picture_url: string | null;   // LINEのプロフィール画像URL
   is_active: boolean;
+  notify_days: NotifyDays | null;  // 曜日制限設定（null = 全曜日通知）
   created_at: string;      // ISO 8601
 }
 

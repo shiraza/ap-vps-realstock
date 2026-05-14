@@ -438,7 +438,7 @@ def get_notification_targets(
     指定されたpart_number + store_idに対する通知対象のLINEユーザーIDリストを取得する
 
     user_monitoring_conditions と notification_users を結合し、
-    is_active=true のユーザーの line_user_id を返す。
+    is_active=true かつ 今日の曜日が notify_days の対象であるユーザーの line_user_id を返す。
 
     Args:
         supabase: Supabaseクライアント
@@ -465,21 +465,45 @@ def get_notification_targets(
         # 対象ユーザーIDのリスト
         user_ids = [c["user_id"] for c in conditions]
 
-        # notification_users からアクティブなユーザーの line_user_id を取得
+        # notification_users からアクティブなユーザーの line_user_id と notify_days を取得
         users_res = (
             supabase.table("notification_users")
-            .select("line_user_id")
+            .select("line_user_id, notify_days")
             .in_("id", user_ids)
             .eq("is_active", True)
             .execute()
         )
         users = users_res.data or []
 
-        return [u["line_user_id"] for u in users]
+        # 今日の曜日キーを取得（日本時間）
+        now_jst = datetime.now(JST)
+        today_key = DAY_KEY_MAP[now_jst.weekday()]  # 例: "mon"
+
+        result = []
+        for u in users:
+            notify_days = u.get("notify_days")
+
+            # notify_days が未設定 or enabled=false → 全曜日通知（制限なし）
+            if not notify_days or not notify_days.get("enabled", False):
+                result.append(u["line_user_id"])
+                continue
+
+            # 曜日制限が有効: 今日が通知対象の曜日かチェック
+            allowed_days = notify_days.get("days", [])
+            if today_key in allowed_days:
+                result.append(u["line_user_id"])
+            else:
+                logger.info(
+                    f"  📅 曜日制限により通知スキップ: {u['line_user_id'][:8]}... "
+                    f"(今日: {today_key}, 許可曜日: {allowed_days})"
+                )
+
+        return result
 
     except Exception as e:
         logger.error(f"❌ 通知対象ユーザーの取得エラー: {e}")
         return []
+
 
 
 # ============================================================
