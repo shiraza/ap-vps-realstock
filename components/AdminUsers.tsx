@@ -2,7 +2,7 @@
  * 管理画面: LINE通知ユーザー管理コンポーネント
  *
  * - notification_users の一覧表示（有効/無効トグル付き）
- * - 各ユーザーの通知曜日制限の設定
+ * - 各ユーザーの通知時間帯制限設定（曜日×時間帯グリッド）
  * - 各ユーザーの監視条件（店舗×商品）をチェックボックスで設定
  * - user_monitoring_conditions の追加/削除をAPI経由で即時反映
  */
@@ -15,20 +15,9 @@ import type {
   WatchProduct,
   NotificationUser,
   UserMonitoringCondition,
-  DayKey,
-  NotifyDays,
+  NotifySchedule,
 } from "@/types/database";
-
-/** 曜日の定義 */
-const DAYS: { key: DayKey; label: string; color: string }[] = [
-  { key: "mon", label: "月", color: "text-gray-300" },
-  { key: "tue", label: "火", color: "text-gray-300" },
-  { key: "wed", label: "水", color: "text-gray-300" },
-  { key: "thu", label: "木", color: "text-gray-300" },
-  { key: "fri", label: "金", color: "text-gray-300" },
-  { key: "sat", label: "土", color: "text-blue-400" },
-  { key: "sun", label: "日", color: "text-red-400" },
-];
+import NotifyScheduleGrid from "@/components/NotifyScheduleGrid";
 
 /** 店舗情報（エリアから展開したフラット構造） */
 interface FlatStore {
@@ -62,10 +51,8 @@ export default function AdminUsers({
   );
   // 展開中のユーザーID
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
-  // 曜日設定の保存中ユーザーID
-  const [savingDaysUserId, setSavingDaysUserId] = useState<string | null>(null);
-  // 編集中の notify_days（ユーザーIDをキーとしたローカルステート）
-  const [editingDays, setEditingDays] = useState<Record<string, NotifyDays>>({});
+  // 通知スケジュールの保存中ユーザーID
+  const [savingScheduleUserId, setSavingScheduleUserId] = useState<string | null>(null);
 
   /**
    * 全エリアの店舗をフラットなリストに展開
@@ -117,68 +104,17 @@ export default function AdminUsers({
   };
 
   /**
-   * 編集中の notify_days を取得（ローカルステートを優先、なければDBの値を使用）
+   * 通知スケジュールを保存
    */
-  const getEditingDays = useCallback(
-    (user: NotificationUser): NotifyDays => {
-      if (editingDays[user.id]) return editingDays[user.id];
-      // DBの値があればそれを使用、なければデフォルト（全曜日OFF）
-      return (
-        user.notify_days ?? {
-          enabled: false,
-          days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
-        }
-      );
-    },
-    [editingDays]
-  );
-
-  /**
-   * 曜日設定の有効/無効スイッチを切り替え
-   */
-  const toggleDaysEnabled = useCallback((user: NotificationUser) => {
-    setEditingDays((prev) => {
-      const current = prev[user.id] ??
-        user.notify_days ??
-        { enabled: false, days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] };
-      return {
-        ...prev,
-        [user.id]: { ...current, enabled: !current.enabled },
-      };
-    });
-  }, []);
-
-  /**
-   * 曜日ボタンをトグル
-   */
-  const toggleDay = useCallback((user: NotificationUser, day: DayKey) => {
-    setEditingDays((prev) => {
-      const current = prev[user.id] ??
-        user.notify_days ??
-        { enabled: false, days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] };
-      const days = current.days.includes(day)
-        ? current.days.filter((d) => d !== day)
-        : [...current.days, day];
-      return {
-        ...prev,
-        [user.id]: { ...current, days },
-      };
-    });
-  }, []);
-
-  /**
-   * 曜日設定を保存
-   */
-  const saveNotifyDays = async (user: NotificationUser) => {
-    const notifyDays = getEditingDays(user);
-    setSavingDaysUserId(user.id);
+  const saveNotifySchedule = async (userId: string, schedule: NotifySchedule) => {
+    setSavingScheduleUserId(userId);
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: user.id,
-          notify_days: notifyDays,
+          id: userId,
+          notify_days: schedule,
         }),
       });
       if (!res.ok) throw new Error("保存に失敗しました");
@@ -186,20 +122,15 @@ export default function AdminUsers({
       // ローカルステートのユーザー情報も更新
       setUsers((prev) =>
         prev.map((u) =>
-          u.id === user.id ? { ...u, notify_days: notifyDays } : u
+          u.id === userId ? { ...u, notify_days: schedule } : u
         )
       );
-      // 編集ステートをクリア
-      setEditingDays((prev) => {
-        const next = { ...prev };
-        delete next[user.id];
-        return next;
-      });
     } catch (err) {
-      console.error("曜日設定保存エラー:", err);
+      console.error("通知スケジュール保存エラー:", err);
       alert("保存に失敗しました。もう一度お試しください。");
+      throw err; // NotifyScheduleGrid内のエラー処理のため再スロー
     } finally {
-      setSavingDaysUserId(null);
+      setSavingScheduleUserId(null);
     }
   };
 
@@ -509,89 +440,16 @@ export default function AdminUsers({
                   </div>
                 </div>
 
-                {/* 曜日通知制限パネル */}
-                {isExpanded && (() => {
-                  const notifyDays = getEditingDays(user);
-                  const isDirty =
-                    JSON.stringify(editingDays[user.id]) !==
-                    JSON.stringify(user.notify_days);
-                  const isSaving = savingDaysUserId === user.id;
-
-                  return (
-                    <div className="border-t border-gray-700/40 px-4 py-3 bg-gray-900/20">
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {/* 有効/無効ラベル＋スイッチ */}
-                        <span className="text-xs text-gray-400 font-medium">📅 曜日制限</span>
-                        <button
-                          onClick={() => toggleDaysEnabled(user)}
-                          className={`
-                            relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200
-                            focus:outline-none
-                            ${notifyDays.enabled ? "bg-amber-500" : "bg-gray-600"}
-                            cursor-pointer
-                          `}
-                          title={notifyDays.enabled ? "曜日制限を無効にする" : "曜日制限を有効にする"}
-                        >
-                          <span
-                            className={`
-                              inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-200
-                              ${notifyDays.enabled ? "translate-x-4.5" : "translate-x-0.5"}
-                            `}
-                          />
-                        </button>
-                        <span className={`text-xs font-medium ${
-                          notifyDays.enabled ? "text-amber-400" : "text-gray-500"
-                        }`}>
-                          {notifyDays.enabled ? "有効" : "無効（全曜日通知）"}
-                        </span>
-
-                        {/* 曜日ボタン */}
-                        <div className={`flex gap-1 ml-2 transition-opacity ${
-                          notifyDays.enabled ? "opacity-100" : "opacity-30 pointer-events-none"
-                        }`}>
-                          {DAYS.map((d) => {
-                            const isSelected = notifyDays.days.includes(d.key);
-                            return (
-                              <button
-                                key={d.key}
-                                onClick={() => toggleDay(user, d.key)}
-                                title={`${d.label}曜日の通知を${isSelected ? "オフ" : "オン"}にする`}
-                                className={`
-                                  w-7 h-7 rounded-md text-xs font-bold transition-all duration-150 cursor-pointer
-                                  ${
-                                    isSelected
-                                      ? `bg-amber-500/80 border border-amber-400/60 ${d.color}`
-                                      : "bg-gray-800/60 border border-gray-700/40 text-gray-600 hover:border-gray-600"
-                                  }
-                                `}
-                              >
-                                {d.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {/* 保存ボタン */}
-                        {(isDirty || editingDays[user.id]) && (
-                          <button
-                            onClick={() => saveNotifyDays(user)}
-                            disabled={isSaving}
-                            className={`
-                              ml-auto text-xs px-3 py-1 rounded-lg transition-colors
-                              ${
-                                isSaving
-                                  ? "bg-blue-500/30 text-blue-300 cursor-not-allowed"
-                                  : "bg-blue-500/80 hover:bg-blue-400 text-white cursor-pointer"
-                              }
-                            `}
-                          >
-                            {isSaving ? "保存中..." : "💾 保存"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* 通知スケジュールパネル（曜日×時間帯グリッド） */}
+                {isExpanded && (
+                  <div className="border-t border-gray-700/40 px-4 py-4 bg-gray-900/20">
+                    <NotifyScheduleGrid
+                      initialSchedule={user.notify_days}
+                      onSave={(schedule) => saveNotifySchedule(user.id, schedule)}
+                      saving={savingScheduleUserId === user.id}
+                    />
+                  </div>
+                )}
 
                 {/* 監視条件パネル（展開時） */}
                 {isExpanded && (

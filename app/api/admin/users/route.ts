@@ -200,18 +200,35 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (notify_days !== undefined) {
-      // バリデーション: notify_days は null またはオブジェクト形式
+      // バリデーション: notify_days は null または { enabled, schedule } 形式
       if (notify_days !== null) {
         const validDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-        if (
-          typeof notify_days.enabled !== "boolean" ||
-          !Array.isArray(notify_days.days) ||
-          !notify_days.days.every((d: unknown) => validDays.includes(d as string))
-        ) {
+        if (typeof notify_days.enabled !== "boolean") {
           return NextResponse.json(
-            { error: "notify_days の形式が不正です（{ enabled: boolean, days: string[] } が必要）" },
+            { error: "notify_days.enabled は真偽値が必要です" },
             { status: 400 }
           );
+        }
+        if (!notify_days.schedule || typeof notify_days.schedule !== "object") {
+          return NextResponse.json(
+            { error: "notify_days.schedule オブジェクトが必要です（{ mon: number[], ... }）" },
+            { status: 400 }
+          );
+        }
+        for (const day of validDays) {
+          const hours = notify_days.schedule[day];
+          if (!Array.isArray(hours)) {
+            return NextResponse.json(
+              { error: `notify_days.schedule.${day} は配列が必要です` },
+              { status: 400 }
+            );
+          }
+          if (!hours.every((h: unknown) => typeof h === "number" && h >= 0 && h <= 23)) {
+            return NextResponse.json(
+              { error: `notify_days.schedule.${day} の値は0〜23の整数が必要です` },
+              { status: 400 }
+            );
+          }
         }
       }
       updatePayload.notify_days = notify_days;

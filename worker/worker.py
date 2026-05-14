@@ -475,27 +475,30 @@ def get_notification_targets(
         )
         users = users_res.data or []
 
-        # 今日の曜日キーを取得（日本時間）
+        # 今日の曜日キーと現在時刻（時）を取得（日本時間）
         now_jst = datetime.now(JST)
         today_key = DAY_KEY_MAP[now_jst.weekday()]  # 例: "mon"
+        current_hour = now_jst.hour                  # 例: 14
 
         result = []
         for u in users:
             notify_days = u.get("notify_days")
 
-            # notify_days が未設定 or enabled=false → 全曜日通知（制限なし）
+            # notify_days が未設定 or enabled=false → 全曜日・全時間通知（制限なし）
             if not notify_days or not notify_days.get("enabled", False):
                 result.append(u["line_user_id"])
                 continue
 
-            # 曜日制限が有効: 今日が通知対象の曜日かチェック
-            allowed_days = notify_days.get("days", [])
-            if today_key in allowed_days:
+            # 時間帯制限が有効: schedule から今日の許可時間帯を取得してチェック
+            schedule = notify_days.get("schedule", {})
+            allowed_hours = schedule.get(today_key, [])
+
+            if current_hour in allowed_hours:
                 result.append(u["line_user_id"])
             else:
                 logger.info(
-                    f"  📅 曜日制限により通知スキップ: {u['line_user_id'][:8]}... "
-                    f"(今日: {today_key}, 許可曜日: {allowed_days})"
+                    f"  📅 時間帯制限により通知スキップ: {u['line_user_id'][:8]}... "
+                    f"(今日: {today_key}, 現在: {current_hour}時, 許可時間帯: {allowed_hours})"
                 )
 
         return result

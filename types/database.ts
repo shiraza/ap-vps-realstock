@@ -39,10 +39,10 @@ export interface StockMatrixRow {
 /** 曜日キー */
 export type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
-/** 通知可能曜日の設定 */
-export interface NotifyDays {
-  enabled: boolean;      // true のときのみ曜日制限が有効
-  days: DayKey[];        // 通知する曜日のリスト（例: ["mon", "wed", "fri"]）
+/** 通知可能時間帯の設定（ポーリングスケジュールと同じ構造） */
+export interface NotifySchedule {
+  enabled: boolean;                          // true のときのみ時間帯制限が有効
+  schedule: Record<DayKey, number[]>;        // 各曜日の通知許可時間帯（例: { mon: [8,9,10], ... }）
 }
 
 /** notification_users テーブルの行 */
@@ -52,7 +52,7 @@ export interface NotificationUser {
   display_name: string | null;  // LINEの表示名
   picture_url: string | null;   // LINEのプロフィール画像URL
   is_active: boolean;
-  notify_days: NotifyDays | null;  // 曜日制限設定（null = 全曜日通知）
+  notify_days: NotifySchedule | null;  // 通知時間帯設定（null = 全曜日・全時間通知）
   created_at: string;      // ISO 8601
 }
 
