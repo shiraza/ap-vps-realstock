@@ -257,6 +257,11 @@ export default function NotifyScheduleGrid({
     setIsDirty(false);
   };
 
+  /** スケジュールが有効だが時間帯が1つも選ばれていないか */
+  const isEnabledButEmpty =
+    scheduleData.enabled &&
+    Object.values(scheduleData.schedule).every((hours) => hours.length === 0);
+
   return (
     <div className="space-y-3">
       {/* ヘッダー: 有効/無効スイッチ */}
@@ -289,6 +294,14 @@ export default function NotifyScheduleGrid({
         <p className="text-[11px] text-gray-500 mb-2">
           🟡 色がついているマスの時間帯に通知が届きます
         </p>
+
+        {/* 警告: 有効なのに時間帯が0件 */}
+        {isEnabledButEmpty && (
+          <div className="mb-2 px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/40 text-red-400 text-[11px] font-medium">
+            ⚠️ 時間帯が1つも選ばれていません。このままでは通知が一切届きません。<br />
+            時間帯を選択するか、スイッチをOFFにして常時通知にしてください。
+          </div>
+        )}
         {/* 操作ボタン */}
         <div className="flex items-center gap-2 mb-2">
           <button
@@ -398,14 +411,19 @@ export default function NotifyScheduleGrid({
       {/* 保存ボタン（変更がある場合のみ表示） */}
       {isDirty && (
         <div className="flex justify-end pt-1">
+          {isEnabledButEmpty && (
+            <span className="text-[11px] text-red-400 mr-3 self-center">
+              時間帯を選択してから保存してください
+            </span>
+          )}
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || isEnabledButEmpty}
             className={`
               text-xs px-4 py-1.5 rounded-lg transition-colors
               ${
-                saving
-                  ? "bg-blue-500/30 text-blue-300 cursor-not-allowed"
+                saving || isEnabledButEmpty
+                  ? "bg-gray-600/50 text-gray-500 cursor-not-allowed"
                   : "bg-blue-500/80 hover:bg-blue-400 text-white cursor-pointer"
               }
             `}
