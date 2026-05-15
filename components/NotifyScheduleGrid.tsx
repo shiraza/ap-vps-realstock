@@ -261,7 +261,7 @@ export default function NotifyScheduleGrid({
     <div className="space-y-3">
       {/* ヘッダー: 有効/無効スイッチ */}
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-xs text-gray-400 font-medium">📅 通知時間帯制限</span>
+        <span className="text-xs text-gray-400 font-medium">📅 通知を受け取る時間帯</span>
         <button
           onClick={handleToggleEnabled}
           className={`
@@ -269,7 +269,7 @@ export default function NotifyScheduleGrid({
             focus:outline-none cursor-pointer
             ${scheduleData.enabled ? "bg-amber-500" : "bg-gray-600"}
           `}
-          title={scheduleData.enabled ? "時間帯制限を無効にする" : "時間帯制限を有効にする"}
+          title={scheduleData.enabled ? "時間帯指定を無効にする（常時通知）" : "時間帯指定を有効にする"}
         >
           <span
             className={`
@@ -279,12 +279,16 @@ export default function NotifyScheduleGrid({
           />
         </button>
         <span className={`text-xs font-medium ${scheduleData.enabled ? "text-amber-400" : "text-gray-500"}`}>
-          {scheduleData.enabled ? "有効" : "無効（全時間帯通知）"}
+          {scheduleData.enabled ? "有効（選んだ時間帯のみ通知）" : "無効（常時通知）"}
         </span>
       </div>
 
       {/* グリッドエリア */}
       <div className={`transition-opacity duration-300 ${scheduleData.enabled ? "opacity-100" : "opacity-30 pointer-events-none"}`}>
+        {/* 説明テキスト */}
+        <p className="text-[11px] text-gray-500 mb-2">
+          🟡 色がついているマスの時間帯に通知が届きます
+        </p>
         {/* 操作ボタン */}
         <div className="flex items-center gap-2 mb-2">
           <button
