@@ -85,9 +85,18 @@ export default function NotifyScheduleGrid({
   onSave,
   saving = false,
 }: NotifyScheduleGridProps) {
-  const [scheduleData, setScheduleData] = useState<NotifySchedule>(
-    initialSchedule ?? DEFAULT_NOTIFY_SCHEDULE
-  );
+  const [scheduleData, setScheduleData] = useState<NotifySchedule>(() => {
+    // initialSchedule が schedule キーを持たない場合も考慮してディープマージ
+    const base = initialSchedule ?? DEFAULT_NOTIFY_SCHEDULE;
+    return {
+      ...DEFAULT_NOTIFY_SCHEDULE,
+      ...base,
+      schedule: {
+        ...DEFAULT_NOTIFY_SCHEDULE.schedule,
+        ...(base.schedule ?? {}),
+      },
+    };
+  });
   const [isDirty, setIsDirty] = useState(false);
 
   // ドラッグ選択の状態管理
