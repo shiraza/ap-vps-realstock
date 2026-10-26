@@ -33,3 +33,11 @@ npm-debug.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# local debug scripts (contain keys) and their outputs
+check_notify.py
+check_status.py
+fix_notify_days.py
+verify_users.py
+check_result.txt
+fix_result.txt
